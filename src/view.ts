@@ -166,7 +166,7 @@ export class MindMapView extends ItemView {
 
     const content = await this.app.vault.cachedRead(file);
     const blocks = parseMarkdown(content);
-    const root = buildTree(blocks, file.basename);
+    const root = buildTree(blocks, file.basename, this.plugin.settings.excludedHeadings);
 
     // 用 Obsidian 渲染每个节点的 markdown 原文 → summaryHtml / fullHtml
     await this.renderNodeHtml(root, file.path);

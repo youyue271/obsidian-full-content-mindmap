@@ -19,7 +19,7 @@ export interface ParsedBlock {
   raw: string;              // 源文件原文切片（含 markdown 语法）
   lang?: string;            // 仅 code：语言标识
   startLine: number;        // 0-based 行号
-  children?: ParsedBlock[]; // 仅 list 用，保留嵌套结构
+  children?: ParsedBlock[]; // listGroup：列表项；list：嵌套子项
 }
 
 /**
@@ -94,7 +94,14 @@ export function parseMarkdown(content: string): ParsedBlock[] {
       }
       case 'list': {
         const list = node as List;
-        blocks.push(...parseListItems(list.children, line));
+        // 顶层列表整体作为一个容器块（listGroup），列表项作为其 children。
+        // 这样"列表前后的段落"与"整个列表"并列，而非与列表的项并列。
+        blocks.push({
+          type: 'listGroup',
+          raw: '',
+          startLine: line,
+          children: parseListItems(list.children, line),
+        });
         break;
       }
       case 'table': {

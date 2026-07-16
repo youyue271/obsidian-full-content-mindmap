@@ -6,10 +6,16 @@
 
 import { Plugin, WorkspaceLeaf } from 'obsidian';
 import { MindMapView, VIEW_TYPE } from './view';
+import { MindMapSettings, DEFAULT_SETTINGS, MindMapSettingTab } from './settings';
 
 export default class FullContentMindMapPlugin extends Plugin {
+  settings: MindMapSettings = DEFAULT_SETTINGS;
+
   async onload() {
     console.log('Loading Full Content MindMap plugin');
+
+    await this.loadSettings();
+    this.addSettingTab(new MindMapSettingTab(this.app, this));
 
     // 注册视图
     this.registerView(VIEW_TYPE, (leaf) => new MindMapView(leaf, this));
@@ -48,6 +54,22 @@ export default class FullContentMindMapPlugin extends Plugin {
   async onunload() {
     console.log('Unloading Full Content MindMap plugin');
     this.app.workspace.detachLeavesOfType(VIEW_TYPE);
+  }
+
+  async loadSettings() {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+  }
+
+  async saveSettings() {
+    await this.saveData(this.settings);
+    this.refreshMindmapViews();
+  }
+
+  /** 设置变更后，刷新所有打开的思维导图视图 */
+  refreshMindmapViews() {
+    this.app.workspace.getLeavesOfType(VIEW_TYPE).forEach((leaf) => {
+      (leaf.view as MindMapView).renderCurrentFile();
+    });
   }
 
   /**

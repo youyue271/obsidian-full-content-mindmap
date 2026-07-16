@@ -14,6 +14,7 @@ export type BlockType =
   | 'table'
   | 'blockquote'
   | 'list'       // 单个列表项（listItem），保留嵌套层级
+  | 'listGroup'  // 一整个列表的容器（其子节点为各 list 项），使列表作为整体与兄弟段落并列
   | 'image'
   | 'math'       // 独立行内 $$ ... $$ 数学公式
   | 'callout'    // Obsidian callout (> [!NOTE])

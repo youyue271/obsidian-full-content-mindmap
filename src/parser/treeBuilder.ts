@@ -15,7 +15,11 @@ import type { MindMapNode } from '../types';
 
 let nodeIdCounter = 0;
 
-export function buildTree(blocks: ParsedBlock[], fileName: string): MindMapNode {
+export function buildTree(
+  blocks: ParsedBlock[],
+  fileName: string,
+  excludedHeadings: string[] = [],
+): MindMapNode {
   nodeIdCounter = 0;
 
   const root: MindMapNode = {
@@ -30,11 +34,30 @@ export function buildTree(blocks: ParsedBlock[], fileName: string): MindMapNode 
     children: [],
   };
 
+  const excludeSet = excludedHeadings
+    .map((h) => normalizeHeading(h))
+    .filter((h) => h.length > 0);
+
   const stack: MindMapNode[] = [root];
+  // 当前正在被排除的标题层级；null 表示未处于排除态
+  let skipLevel: number | null = null;
 
   for (const block of blocks) {
     if (block.type === 'heading') {
       const level = block.headingLevel!;
+
+      // 若处于排除态：遇到同级或更高级标题才结束排除，否则继续跳过
+      if (skipLevel !== null) {
+        if (level > skipLevel) continue;
+        skipLevel = null;
+      }
+
+      // 命中排除名单：跳过该标题及其下所有内容，直到出现同级/更高级标题
+      if (excludeSet.includes(normalizeHeading(block.raw))) {
+        skipLevel = level;
+        continue;
+      }
+
       while (stack.length > 1) {
         const top = stack[stack.length - 1];
         if (top.type === 'heading' && top.headingLevel! >= level) stack.pop();
@@ -54,15 +77,32 @@ export function buildTree(blocks: ParsedBlock[], fileName: string): MindMapNode 
       stack[stack.length - 1].children.push(headingNode);
       stack.push(headingNode);
 
-    } else if (block.type === 'list') {
-      stack[stack.length - 1].children.push(buildListNode(block));
-
     } else {
-      stack[stack.length - 1].children.push(buildBlockNode(block));
+      // 非标题内容：处于排除态时一并跳过
+      if (skipLevel !== null) continue;
+
+      if (block.type === 'listGroup') {
+        stack[stack.length - 1].children.push(buildListGroupNode(block));
+      } else {
+        stack[stack.length - 1].children.push(buildBlockNode(block));
+      }
     }
   }
 
   return root;
+}
+
+/**
+ * 归一化标题文本用于排除匹配：
+ * 去掉行首 #、去掉双链语法（[[a|b]]→b、[[a]]→a）、trim、转小写
+ */
+function normalizeHeading(text: string): string {
+  return text
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2')
+    .replace(/\[\[([^\]]+)\]\]/g, '$1')
+    .trim()
+    .toLowerCase();
 }
 
 /** 构建普通块节点（非标题、非列表） */
@@ -79,7 +119,26 @@ function buildBlockNode(block: ParsedBlock): MindMapNode {
   }, block);
 }
 
-/** 递归构建列表节点（保留嵌套层级）；列表项走 inline 渲染以支持双链/格式 */
+/**
+ * 构建列表容器节点：整个列表作为一个单元，与前后段落并列（同级）；
+ * 列表项作为容器的子节点降一层。容器本身只显示一个轻量标记。
+ */
+function buildListGroupNode(block: ParsedBlock): MindMapNode {
+  const items = block.children?.map(buildListNode) || [];
+  return {
+    id: genId(),
+    type: 'listGroup',
+    renderMode: 'static',
+    staticHtml: `<span class="mm-list-group">≡ ${items.length}</span>`,
+    summaryHtml: '',
+    fullHtml: '',
+    expanded: false,
+    startLine: block.startLine,
+    children: items,
+  };
+}
+
+/** 递归构建列表项节点（保留嵌套层级）；列表项走 inline 渲染以支持双链/格式 */
 function buildListNode(block: ParsedBlock): MindMapNode {
   const children = block.children?.map(buildListNode) || [];
   return {

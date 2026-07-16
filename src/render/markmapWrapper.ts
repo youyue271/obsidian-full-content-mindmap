@@ -26,7 +26,7 @@ export function createMarkmap(svgEl: SVGSVGElement): MarkmapController {
   const mm = Markmap.create(svgEl, {
     duration: 300,
     maxWidth: 260,       // 限制宽度，配合 CSS nowrap→normal 触发换行
-    initialExpandLevel: 2,
+    initialExpandLevel: -1, // 默认全展开：忠实呈现全文；长内容由折叠卡片收纳，深层可手动折叠
     spacingHorizontal: 40,
     spacingVertical: 6,
     paddingX: 12,
@@ -50,9 +50,6 @@ export function createMarkmap(svgEl: SVGSVGElement): MarkmapController {
  * 递归把 MindMapNode 转成 markmap 需要的 IMarkmapNode
  */
 export function toIMarkmapNode(node: MindMapNode, depth = 0): IMarkmapNode {
-  // heading / root / list 节点不折叠；内容节点超过 depth 2 时默认折叠
-  const fold = shouldFoldByDefault(node) ? 1 : 0;
-
   return {
     type: node.type,
     depth,
@@ -60,19 +57,10 @@ export function toIMarkmapNode(node: MindMapNode, depth = 0): IMarkmapNode {
     children: node.children.map((c) => toIMarkmapNode(c, depth + 1)),
     payload: {
       id: node.id,
-      fold,
+      // 不强制折叠：交给 markmap 的 initialExpandLevel 统一控制，避免隐藏列表项等子内容
       startLine: node.startLine,
     },
   };
-}
-
-/**
- * 深层内容节点默认折叠，避免首次渲染太乱
- * 策略：叶子节点 depth >= 3 时折叠
- */
-function shouldFoldByDefault(node: MindMapNode): boolean {
-  if (node.type === 'root' || node.type === 'heading') return false;
-  return true;
 }
 
 /**
