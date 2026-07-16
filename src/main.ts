@@ -65,10 +65,17 @@ export default class FullContentMindMapPlugin extends Plugin {
     this.refreshMindmapViews();
   }
 
-  /** 设置变更后，刷新所有打开的思维导图视图 */
+  /** 设置变更后，刷新所有打开的思维导图视图（重新解析，用于排除标题等） */
   refreshMindmapViews() {
     this.app.workspace.getLeavesOfType(VIEW_TYPE).forEach((leaf) => {
       (leaf.view as MindMapView).renderCurrentFile();
+    });
+  }
+
+  /** 展开层级变更后，应用到所有打开的思维导图视图（无需重新解析） */
+  applyExpandLevelToViews(level: number) {
+    this.app.workspace.getLeavesOfType(VIEW_TYPE).forEach((leaf) => {
+      (leaf.view as MindMapView).setExpandLevel(level);
     });
   }
 

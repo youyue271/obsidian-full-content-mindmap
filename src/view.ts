@@ -26,6 +26,7 @@ export class MindMapView extends ItemView {
   private filePath: string | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private fitTimer: number | null = null;
+  private levelSel: HTMLSelectElement | null = null;
   /** 承载本轮 markdown 渲染产生的子组件，重渲前整体卸载以避免泄漏 */
   private renderScope: Component | null = null;
 
@@ -37,6 +38,13 @@ export class MindMapView extends ItemView {
   /** 供命令读取当前文件路径 */
   getFilePath(): string | null {
     return this.filePath;
+  }
+
+  /** 设置展开层级并同步工具栏选择器（设置面板变更时调用） */
+  setExpandLevel(level: number): void {
+    if (this.levelSel) this.levelSel.value = String(level);
+    this.mm?.expandTo(level);
+    setTimeout(() => this.mm?.fit(), 80);
   }
 
   async setState(state: any, result: any): Promise<void> {
@@ -72,14 +80,30 @@ export class MindMapView extends ItemView {
     this.svgEl.style.height = '100%';
     svgWrap.appendChild(this.svgEl);
 
-    this.mm = createMarkmap(this.svgEl);
+    this.mm = createMarkmap(this.svgEl, this.plugin.settings.defaultExpandLevel);
 
     // 容器尺寸变化时（打开、拖拽面板、窗口 resize）防抖重新适应窗口
     this.resizeObserver = new ResizeObserver(() => this.scheduleFit());
     this.resizeObserver.observe(svgWrap);
 
-    // 工具栏（底部）—— 返回编辑改由命令切换，这里不再放该按钮
+    // 工具栏（底部）
     const toolbar = container.createDiv({ cls: 'mm-toolbar' });
+
+    // 展开层级选择器
+    toolbar.createEl('span', { text: '展开层级：', cls: 'mm-label' });
+    const levelSel = toolbar.createEl('select', { cls: 'mm-select' });
+    levelSel.createEl('option', { value: '-1', text: '全部' });
+    for (let i = 1; i <= 5; i++) {
+      levelSel.createEl('option', { value: String(i), text: `第 ${i} 层` });
+    }
+    levelSel.value = String(this.plugin.settings.defaultExpandLevel);
+    levelSel.addEventListener('change', () => {
+      const lv = parseInt(levelSel.value, 10);
+      this.mm?.expandTo(lv);
+      setTimeout(() => this.mm?.fit(), 80);
+    });
+    this.levelSel = levelSel;
+
     toolbar.createEl('button', { text: '适应窗口', cls: 'mm-btn' })
       .addEventListener('click', () => this.mm?.fit());
     toolbar.createEl('button', { text: '刷新', cls: 'mm-btn' })
@@ -236,7 +260,8 @@ export class MindMapView extends ItemView {
       const fontSize = Math.max(1.6 - level * 0.1, 1.0);
       return `<div class="mm-heading" style="font-size:${fontSize}em;font-weight:600;">${inner}</div>`;
     }
-    return `<div class="mm-inline mm-${node.type}">${inner}</div>`;
+    const supplementClass = node.isSupplement ? ' mm-supplement' : '';
+    return `<div class="mm-inline mm-${node.type}${supplementClass}">${inner}</div>`;
   }
 
   /**

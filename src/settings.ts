@@ -8,10 +8,13 @@ import type FullContentMindMapPlugin from './main';
 export interface MindMapSettings {
   /** 生成思维导图时要排除的标题（按标题文本匹配，大小写不敏感，双链取显示文本） */
   excludedHeadings: string[];
+  /** 默认展开层级：-1 = 全部展开，1–5 = 展开到该层 */
+  defaultExpandLevel: number;
 }
 
 export const DEFAULT_SETTINGS: MindMapSettings = {
   excludedHeadings: ['相关链接'],
+  defaultExpandLevel: -1,
 };
 
 export class MindMapSettingTab extends PluginSettingTab {
@@ -29,6 +32,21 @@ export class MindMapSettingTab extends PluginSettingTab {
     containerEl.createEl('h3', { text: '思维导图设置' });
 
     new Setting(containerEl)
+      .setName('默认展开层级')
+      .setDesc('打开思维导图时默认展开到第几层。「全部展开」会展示整篇文档的所有节点。')
+      .addDropdown((dd) => {
+        dd.addOption('-1', '全部展开');
+        for (let i = 1; i <= 5; i++) dd.addOption(String(i), `第 ${i} 层`);
+        dd.setValue(String(this.plugin.settings.defaultExpandLevel));
+        dd.onChange(async (value) => {
+          const level = parseInt(value, 10);
+          this.plugin.settings.defaultExpandLevel = level;
+          await this.plugin.saveData(this.plugin.settings);
+          this.plugin.applyExpandLevelToViews(level);
+        });
+      });
+
+    new Setting(containerEl)
       .setName('排除标题')
       .setDesc(
         '这些标题及其下方的所有内容不会出现在思维导图中，直到遇到同级或更高级的标题。' +
@@ -44,7 +62,6 @@ export class MindMapSettingTab extends PluginSettingTab {
               .map((s) => s.trim())
               .filter((s) => s.length > 0);
             await this.plugin.saveSettings();
-            this.plugin.refreshMindmapViews();
           });
         text.inputEl.rows = 6;
         text.inputEl.style.width = '100%';

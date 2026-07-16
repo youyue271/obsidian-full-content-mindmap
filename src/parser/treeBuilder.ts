@@ -81,10 +81,19 @@ export function buildTree(
       // 非标题内容：处于排除态时一并跳过
       if (skipLevel !== null) continue;
 
+      const parent = stack[stack.length - 1];
+
       if (block.type === 'listGroup') {
-        stack[stack.length - 1].children.push(buildListGroupNode(block));
+        parent.children.push(buildListGroupNode(block));
+      } else if (block.type === 'blockquote') {
+        // 普通 > 引用视为对「上一段/上一节点」的补充：
+        // 挂到最近的非引用兄弟节点之下；若没有兄弟则挂到父节点（通常是标题）。
+        const node = buildBlockNode(block);
+        node.isSupplement = true;
+        const anchor = lastNonQuoteChild(parent) ?? parent;
+        anchor.children.push(node);
       } else {
-        stack[stack.length - 1].children.push(buildBlockNode(block));
+        parent.children.push(buildBlockNode(block));
       }
     }
   }
@@ -103,6 +112,14 @@ function normalizeHeading(text: string): string {
     .replace(/\[\[([^\]]+)\]\]/g, '$1')
     .trim()
     .toLowerCase();
+}
+
+/** 找父节点中最后一个「非引用补充」的子节点，作为引用的挂载锚点 */
+function lastNonQuoteChild(parent: MindMapNode): MindMapNode | null {
+  for (let i = parent.children.length - 1; i >= 0; i--) {
+    if (!parent.children[i].isSupplement) return parent.children[i];
+  }
+  return null;
 }
 
 /** 构建普通块节点（非标题、非列表） */

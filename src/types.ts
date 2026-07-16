@@ -68,6 +68,9 @@ export interface MindMapNode {
   /** 是否当前处于展开态 */
   expanded: boolean;
 
+  /** 是否为"补充说明"节点（如 > 引用），渲染时加视觉标记挂在上一节点下方 */
+  isSupplement?: boolean;
+
   /** 该块在源文件中的起始行（0-based），用于点击跳转 */
   startLine: number;
 
