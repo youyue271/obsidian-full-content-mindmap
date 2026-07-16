@@ -12,6 +12,7 @@
     "noImplicitAny": true,
     "strictNullChecks": true,
     "esModuleInterop": true,
+    "skipLibCheck": true,
     "outDir": "dist"
   },
   "include": ["src/**/*.ts"]

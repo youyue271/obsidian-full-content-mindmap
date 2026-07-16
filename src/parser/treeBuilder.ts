@@ -5,6 +5,9 @@
  * 1. 标题按 level 构建主干树（H1 > H2 > H3 …）
  * 2. 标题与标题之间的所有块内容 → 挂到前一个标题作为子节点
  * 3. 文档开头无标题的内容 → 挂到虚拟根节点
+ *
+ * 本层只决定"每个节点怎么渲染"（renderMode + 原文 / 静态 HTML），
+ * 真正的 markdown→HTML 渲染在 view.ts 用 Obsidian 的 MarkdownRenderer 完成。
  */
 
 import type { ParsedBlock } from './blockParser';
@@ -18,93 +21,74 @@ export function buildTree(blocks: ParsedBlock[], fileName: string): MindMapNode 
   const root: MindMapNode = {
     id: genId(),
     type: 'root',
-    summaryHtml: `<strong>${escapeHtml(fileName)}</strong>`,
-    fullHtml: `<strong>${escapeHtml(fileName)}</strong>`,
+    renderMode: 'static',
+    staticHtml: `<strong>${escapeHtml(fileName)}</strong>`,
+    summaryHtml: '',
+    fullHtml: '',
     expanded: false,
     startLine: 0,
     children: [],
   };
 
-  // 栈：维护当前的标题层级路径
   const stack: MindMapNode[] = [root];
 
   for (const block of blocks) {
     if (block.type === 'heading') {
       const level = block.headingLevel!;
-
-      // 弹出栈中 level >= 当前标题的节点
       while (stack.length > 1) {
         const top = stack[stack.length - 1];
-        if (top.type === 'heading' && top.headingLevel! >= level) {
-          stack.pop();
-        } else {
-          break;
-        }
+        if (top.type === 'heading' && top.headingLevel! >= level) stack.pop();
+        else break;
       }
-
-      // 创建标题节点
-      const headingNode: MindMapNode = {
+      const headingNode = configureNode({
         id: genId(),
         type: 'heading',
         headingLevel: level,
-        summaryHtml: renderHeadingHtml(block.raw, level),
-        fullHtml: renderHeadingHtml(block.raw, level),
+        renderMode: 'inline',
+        summaryHtml: '',
+        fullHtml: '',
         expanded: false,
         startLine: block.startLine,
         children: [],
-      };
-
-      // 挂到栈顶（父标题 或 root）
+      }, block);
       stack[stack.length - 1].children.push(headingNode);
       stack.push(headingNode);
 
     } else if (block.type === 'list') {
-      // 列表节点：递归挂载
-      const listNode = buildListNode(block);
-      stack[stack.length - 1].children.push(listNode);
+      stack[stack.length - 1].children.push(buildListNode(block));
 
     } else {
-      // 其他块：挂到当前栈顶
-      const node = buildBlockNode(block);
-      stack[stack.length - 1].children.push(node);
+      stack[stack.length - 1].children.push(buildBlockNode(block));
     }
   }
 
   return root;
 }
 
-/**
- * 构建普通块节点（非标题、非列表）
- */
+/** 构建普通块节点（非标题、非列表） */
 function buildBlockNode(block: ParsedBlock): MindMapNode {
-  const id = genId();
-  const { summaryHtml, fullHtml } = renderBlockHtml(block, id);
-
-  return {
-    id,
+  return configureNode({
+    id: genId(),
     type: block.type,
-    summaryHtml,
-    fullHtml,
+    renderMode: 'inline',
+    summaryHtml: '',
+    fullHtml: '',
     expanded: false,
     startLine: block.startLine,
     children: [],
-  };
+  }, block);
 }
 
-/**
- * 递归构建列表节点（保留嵌套层级）
- */
+/** 递归构建列表节点（保留嵌套层级）；列表项走 inline 渲染以支持双链/格式 */
 function buildListNode(block: ParsedBlock): MindMapNode {
   const children = block.children?.map(buildListNode) || [];
-
-  // 列表项的摘要与完整态相同（短文本不展开）
-  const html = `<span class="list-item">${escapeHtml(block.raw)}</span>`;
-
   return {
     id: genId(),
     type: 'list',
-    summaryHtml: html,
-    fullHtml: html,
+    renderMode: 'inline',
+    markdown: block.raw,
+    summaryHtml: '',
+    fullHtml: '',
     expanded: false,
     startLine: block.startLine,
     children,
@@ -112,95 +96,77 @@ function buildListNode(block: ParsedBlock): MindMapNode {
 }
 
 /**
- * 渲染标题 HTML
+ * 根据块类型设置节点的渲染方式与内容来源。
+ * - 长段落 / 代码 / 表格 → collapsible（摘要卡片 + 展开）
+ * - 其余 → inline（直接渲染原文）
  */
-function renderHeadingHtml(text: string, level: number): string {
-  const fontSize = Math.max(1.6 - level * 0.1, 1.0);
-  return `<span style="font-size: ${fontSize}em; font-weight: 600;">${escapeHtml(text)}</span>`;
-}
-
-/**
- * 渲染块 HTML（摘要 + 完整）
- * 注意：这里生成的 HTML 最外层必须有 data-node-id，供 view.ts 的事件代理定位
- */
-function renderBlockHtml(block: ParsedBlock, nodeId: string): { summaryHtml: string; fullHtml: string } {
+function configureNode(node: MindMapNode, block: ParsedBlock): MindMapNode {
   switch (block.type) {
+    case 'heading': {
+      // 去掉行首 # 只渲染标题文字（保留其中的双链/格式），字号随层级
+      node.markdown = block.raw.replace(/^#{1,6}\s+/, '');
+      node.renderMode = 'inline';
+      return node;
+    }
+
     case 'paragraph': {
-      const text = block.raw;
-      if (text.length <= 80) {
-        const html = `<span>${escapeHtml(text)}</span>`;
-        return { summaryHtml: html, fullHtml: html };
+      const text = block.raw.trim();
+      if (text.length <= 80 && !text.includes('\n')) {
+        node.renderMode = 'inline';
+        node.markdown = text;
+      } else {
+        node.renderMode = 'collapsible';
+        node.markdown = text;
+        const preview = escapeHtml(oneLine(text).slice(0, 80));
+        node.collapsedHtml =
+          `<span data-node-id="${node.id}">${preview}… <button class="expand-btn">展开</button></span>`;
       }
-      const summary = `<span data-node-id="${nodeId}">${escapeHtml(text.slice(0, 80))}… <button class="expand-btn">展开</button></span>`;
-      const full = `<span data-node-id="${nodeId}">${escapeHtml(text)} <button class="collapse-btn">折叠</button></span>`;
-      return { summaryHtml: summary, fullHtml: full };
+      return node;
     }
 
     case 'code': {
-      const lines = block.raw.split('\n');
-      const firstLine = lines[0] || '';
-      const summary = `<div class="code-summary" data-node-id="${nodeId}">
-        <span class="code-lang">代码</span>
-        <code>${escapeHtml(firstLine)}</code>
-        <button class="expand-btn">展开</button>
-      </div>`;
-      const full = `<pre data-node-id="${nodeId}"><code>${escapeHtml(block.raw)}</code> <button class="collapse-btn">折叠</button></pre>`;
-      return { summaryHtml: summary, fullHtml: full };
+      const firstLine = (block.raw.split('\n')[0] || '').trim();
+      const langBadge = block.lang ? escapeHtml(block.lang) : '代码';
+      node.renderMode = 'collapsible';
+      node.collapsedHtml = `<div class="code-summary" data-node-id="${node.id}">` +
+        `<span class="code-lang">${langBadge}</span>` +
+        `<code>${escapeHtml(firstLine || '…')}</code>` +
+        `<button class="expand-btn">展开</button></div>`;
+      // 展开时重新围栏交给 Obsidian 渲染（获得语法高亮）
+      const fence = '```' + (block.lang || '') + '\n' + block.raw + '\n```';
+      node.markdown = fence;
+      return node;
     }
 
     case 'table': {
-      const lines = block.raw.split('\n');
-      const rows = lines.length;
+      const lines = block.raw.split('\n').filter((l) => l.trim());
+      const rows = Math.max(lines.length - 1, 0); // 减去分隔行
       const cols = (lines[0]?.match(/\|/g)?.length || 2) - 1;
-      const summary = `<div class="table-summary" data-node-id="${nodeId}">
-        📊 表格 (${rows}×${cols})
-        <button class="expand-btn">展开</button>
-      </div>`;
-      const full = `<div class="table-full" data-node-id="${nodeId}"><pre>${escapeHtml(block.raw)}</pre> <button class="collapse-btn">折叠</button></div>`;
-      return { summaryHtml: summary, fullHtml: full };
-    }
-
-    case 'image': {
-      // 解析 ![alt](url)
-      const match = block.raw.match(/!\[([^\]]*)\]\(([^)]+)\)/);
-      const url = match?.[2] || '';
-      const alt = match?.[1] || 'image';
-      const summary = `<img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" style="max-width: 120px; max-height: 80px; border-radius: 4px;" />`;
-      const full = `<img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" style="max-width: 300px; border-radius: 4px;" />`;
-      return { summaryHtml: summary, fullHtml: full };
-    }
-
-    case 'blockquote': {
-      const html = `<blockquote style="border-left: 3px solid #aaa; padding-left: 8px; font-style: italic;">${escapeHtml(block.raw)}</blockquote>`;
-      return { summaryHtml: html, fullHtml: html };
-    }
-
-    case 'callout': {
-      const html = `<div class="callout" style="border-left: 3px solid #4a9eff; padding-left: 8px; background: rgba(74, 158, 255, 0.1);">${escapeHtml(block.raw)}</div>`;
-      return { summaryHtml: html, fullHtml: html };
+      node.renderMode = 'collapsible';
+      node.collapsedHtml = `<div class="table-summary" data-node-id="${node.id}">` +
+        `📊 表格 (${rows}×${cols})<button class="expand-btn">展开</button></div>`;
+      node.markdown = block.raw; // 展开时渲染为真正的 HTML 表格
+      return node;
     }
 
     case 'hr': {
-      const html = `<hr style="border: none; border-top: 1px solid #ccc;" />`;
-      return { summaryHtml: html, fullHtml: html };
+      node.renderMode = 'static';
+      node.staticHtml = `<hr class="mm-hr" />`;
+      return node;
     }
 
-    case 'html': {
-      // 直接渲染 HTML（注意安全风险，MVP 阶段先保留）
-      return { summaryHtml: block.raw, fullHtml: block.raw };
-    }
-
-    case 'math': {
-      // 暂时用纯文本显示公式，后期接入 KaTeX
-      const html = `<code class="math">$$ ${escapeHtml(block.raw)} $$</code>`;
-      return { summaryHtml: html, fullHtml: html };
-    }
-
+    // blockquote / callout / image / math / html → inline，直接渲染原文
     default: {
-      const html = `<span>${escapeHtml(block.raw)}</span>`;
-      return { summaryHtml: html, fullHtml: html };
+      node.renderMode = 'inline';
+      node.markdown = block.raw;
+      return node;
     }
   }
+}
+
+/** 把多行压成单行预览 */
+function oneLine(text: string): string {
+  return text.replace(/\s*\n\s*/g, ' ').trim();
 }
 
 function genId(): string {

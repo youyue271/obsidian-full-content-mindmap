@@ -14,10 +14,10 @@ export default class FullContentMindMapPlugin extends Plugin {
     // 注册视图
     this.registerView(VIEW_TYPE, (leaf) => new MindMapView(leaf, this));
 
-    // 命令：在当前标签页切换到思维导图视图
+    // 命令：在 markdown ⇄ 思维导图之间来回切换（同一个命令双向）
     this.addCommand({
-      id: 'open-mindmap-view',
-      name: '打开思维导图',
+      id: 'toggle-mindmap-view',
+      name: '切换思维导图 / 文档',
       callback: () => {
         this.toggleMindmapInCurrentLeaf();
       },
@@ -51,22 +51,37 @@ export default class FullContentMindMapPlugin extends Plugin {
   }
 
   /**
-   * 在当前 leaf 上切换到思维导图视图（原地替换 viewState）
+   * 在当前 leaf 上双向切换：
+   * - markdown 视图 → 思维导图
+   * - 思维导图 → markdown（切回原文件的编辑模式）
    */
   async toggleMindmapInCurrentLeaf() {
     const activeLeaf = this.app.workspace.activeLeaf;
     if (!activeLeaf) return;
 
-    const file = this.app.workspace.getActiveFile();
-    if (!file || file.extension !== 'md') {
+    const currentType = activeLeaf.view.getViewType();
+
+    // 已在思维导图 → 切回 markdown
+    if (currentType === VIEW_TYPE) {
+      const mindmapView = activeLeaf.view as MindMapView;
+      const path = mindmapView.getFilePath();
+      if (!path) return;
+      await activeLeaf.setViewState({
+        type: 'markdown',
+        active: true,
+        state: { file: path, mode: 'source' },
+      });
       return;
     }
 
-    // 在当前 leaf 上设置为思维导图视图
+    // 在 markdown（或其它）视图 → 切到思维导图
+    const file = this.app.workspace.getActiveFile();
+    if (!file || file.extension !== 'md') return;
+
     await activeLeaf.setViewState({
       type: VIEW_TYPE,
       active: true,
-      state: { file: file.path }
+      state: { file: file.path },
     });
   }
 

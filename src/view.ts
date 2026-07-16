@@ -3,12 +3,12 @@
  *
  * 负责：
  * 1. 维护 SVG 容器和 Markmap 实例
- * 2. 接收文件内容 → 解析 → 渲染
- * 3. 处理节点点击：展开/折叠 + 跳转到源文件
- * 4. 主题跟随 Obsidian 明暗色
+ * 2. 接收文件内容 → 解析 → 用 Obsidian 的 MarkdownRenderer 渲染每个节点 → 渲染
+ * 3. 处理节点点击：展开/折叠 + 双链/外链跳转
+ * 4. 自适应窗口（ResizeObserver）
  */
 
-import { ItemView, WorkspaceLeaf, TFile, MarkdownView } from 'obsidian';
+import { ItemView, WorkspaceLeaf, TFile, MarkdownView, MarkdownRenderer, Component } from 'obsidian';
 import type FullContentMindMapPlugin from './main';
 import { parseMarkdown } from './parser/blockParser';
 import { buildTree } from './parser/treeBuilder';
@@ -26,27 +26,25 @@ export class MindMapView extends ItemView {
   private filePath: string | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private fitTimer: number | null = null;
+  /** 承载本轮 markdown 渲染产生的子组件，重渲前整体卸载以避免泄漏 */
+  private renderScope: Component | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: FullContentMindMapPlugin) {
     super(leaf);
     this.plugin = plugin;
   }
 
-  /**
-   * 接收 setViewState 传入的 state（含目标文件路径）
-   */
+  /** 供命令读取当前文件路径 */
+  getFilePath(): string | null {
+    return this.filePath;
+  }
+
   async setState(state: any, result: any): Promise<void> {
-    if (state?.file) {
-      this.filePath = state.file;
-    }
+    if (state?.file) this.filePath = state.file;
     await super.setState(state, result);
-    // state 到达后渲染对应文件
     await this.renderCurrentFile();
   }
 
-  /**
-   * 持久化 state（切换/重载时保留文件路径）
-   */
   getState(): any {
     return { file: this.filePath };
   }
@@ -68,7 +66,6 @@ export class MindMapView extends ItemView {
     container.empty();
     container.addClass('full-mindmap-container');
 
-    // SVG 容器（先放，撑满剩余空间）
     const svgWrap = container.createDiv({ cls: 'mm-svg-wrap' });
     this.svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg') as SVGSVGElement;
     this.svgEl.style.width = '100%';
@@ -81,41 +78,14 @@ export class MindMapView extends ItemView {
     this.resizeObserver = new ResizeObserver(() => this.scheduleFit());
     this.resizeObserver.observe(svgWrap);
 
-    // 工具栏（底部）
+    // 工具栏（底部）—— 返回编辑改由命令切换，这里不再放该按钮
     const toolbar = container.createDiv({ cls: 'mm-toolbar' });
-    toolbar.createEl('button', { text: '返回编辑', cls: 'mm-btn' })
-      .addEventListener('click', () => this.switchBackToMarkdown());
     toolbar.createEl('button', { text: '适应窗口', cls: 'mm-btn' })
       .addEventListener('click', () => this.mm?.fit());
     toolbar.createEl('button', { text: '刷新', cls: 'mm-btn' })
       .addEventListener('click', () => this.renderCurrentFile());
 
-    // 事件代理：点击 expand/collapse 按钮 → 切换展开态
-    svgWrap.addEventListener('click', (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-
-      // 只有点在展开/折叠按钮上才切换
-      const btn = target.closest('.expand-btn, .collapse-btn') as HTMLElement | null;
-      if (btn && this.currentRoot) {
-        const nodeEl = btn.closest('[data-node-id]') as HTMLElement | null;
-        const nodeId = nodeEl?.dataset.nodeId;
-        if (nodeId) {
-          toggleNodeExpansion(this.currentRoot, nodeId);
-          this.mm?.setData(this.currentRoot);
-          // 重新布局后适应窗口
-          this.scheduleFit();
-        }
-        e.stopPropagation();
-        return;
-      }
-
-      // 点击节点跳转到源文件（data-jump-line 后续版本挂载）
-      const jumpEl = target.closest('[data-jump-line]') as HTMLElement | null;
-      if (jumpEl) {
-        const line = parseInt(jumpEl.dataset.jumpLine || '0', 10);
-        this.jumpToLine(line);
-      }
-    });
+    svgWrap.addEventListener('click', (e: MouseEvent) => this.handleSvgClick(e));
 
     await this.renderCurrentFile();
   }
@@ -127,8 +97,146 @@ export class MindMapView extends ItemView {
       window.clearTimeout(this.fitTimer);
       this.fitTimer = null;
     }
+    if (this.renderScope) {
+      this.removeChild(this.renderScope);
+      this.renderScope = null;
+    }
     this.mm?.destroy();
     this.mm = null;
+  }
+
+  /** 委托处理 SVG 内的点击：展开/折叠、双链、外链 */
+  private handleSvgClick(e: MouseEvent): void {
+    const target = e.target as HTMLElement;
+
+    // 1) 展开/折叠按钮
+    const btn = target.closest('.expand-btn, .collapse-btn') as HTMLElement | null;
+    if (btn && this.currentRoot) {
+      const nodeEl = btn.closest('[data-node-id]') as HTMLElement | null;
+      const nodeId = nodeEl?.dataset.nodeId;
+      if (nodeId) {
+        toggleNodeExpansion(this.currentRoot, nodeId);
+        this.mm?.setData(this.currentRoot);
+        this.scheduleFit();
+      }
+      e.stopPropagation();
+      e.preventDefault();
+      return;
+    }
+
+    // 2) 内部双链（Obsidian 渲染出的 a.internal-link）
+    const internal = target.closest('a.internal-link') as HTMLAnchorElement | null;
+    if (internal) {
+      const linktext = internal.dataset.href || internal.getAttribute('href') || internal.textContent || '';
+      if (linktext) {
+        this.app.workspace.openLinkText(linktext, this.currentFile?.path || '', false);
+      }
+      e.stopPropagation();
+      e.preventDefault();
+      return;
+    }
+
+    // 3) 外部链接
+    const ext = target.closest('a.external-link, a[href^="http"]') as HTMLAnchorElement | null;
+    if (ext) {
+      const href = ext.getAttribute('href');
+      if (href) window.open(href, '_blank');
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }
+
+  async renderCurrentFile(): Promise<void> {
+    let file: TFile | null = null;
+    if (this.filePath) {
+      const f = this.app.vault.getAbstractFileByPath(this.filePath);
+      if (f instanceof TFile) file = f;
+    }
+    if (!file) {
+      const active = this.app.workspace.getActiveFile();
+      if (active && active.extension === 'md') file = active;
+    }
+    if (!file || file.extension !== 'md') return;
+    await this.renderFile(file);
+  }
+
+  async renderFile(file: TFile): Promise<void> {
+    this.currentFile = file;
+    this.filePath = file.path;
+
+    const content = await this.app.vault.cachedRead(file);
+    const blocks = parseMarkdown(content);
+    const root = buildTree(blocks, file.basename);
+
+    // 用 Obsidian 渲染每个节点的 markdown 原文 → summaryHtml / fullHtml
+    await this.renderNodeHtml(root, file.path);
+    this.currentRoot = root;
+
+    if (this.mm) {
+      this.mm.setData(root);
+      this.scheduleFit();
+    }
+  }
+
+  /**
+   * 遍历节点树，用 Obsidian 的 MarkdownRenderer 把 markdown 原文渲染成 HTML，
+   * 填入每个节点的 summaryHtml / fullHtml。整棵树并行渲染。
+   */
+  private async renderNodeHtml(root: MindMapNode, sourcePath: string): Promise<void> {
+    // 每轮重建渲染作用域，卸载上一轮的子组件
+    if (this.renderScope) this.removeChild(this.renderScope);
+    this.renderScope = new Component();
+    this.addChild(this.renderScope);
+    const scope = this.renderScope;
+
+    const tasks: Promise<void>[] = [];
+    const walk = (node: MindMapNode) => {
+      tasks.push(this.fillNode(node, sourcePath, scope));
+      node.children.forEach(walk);
+    };
+    walk(root);
+    await Promise.all(tasks);
+  }
+
+  /** 渲染单个节点，按 renderMode 填充 summaryHtml / fullHtml */
+  private async fillNode(node: MindMapNode, sourcePath: string, scope: Component): Promise<void> {
+    if (node.renderMode === 'static') {
+      node.summaryHtml = node.staticHtml || '';
+      node.fullHtml = node.staticHtml || '';
+      return;
+    }
+
+    if (node.renderMode === 'inline') {
+      const inner = await this.renderMd(node.markdown || '', sourcePath, scope);
+      const html = this.wrapInline(node, inner);
+      node.summaryHtml = html;
+      node.fullHtml = html;
+      return;
+    }
+
+    // collapsible
+    node.summaryHtml = node.collapsedHtml || `<span data-node-id="${node.id}">…</span>`;
+    const inner = node.expandedHtml ?? await this.renderMd(node.markdown || '', sourcePath, scope);
+    node.fullHtml =
+      `<div class="mm-expanded" data-node-id="${node.id}">${inner}` +
+      `<button class="collapse-btn">折叠</button></div>`;
+  }
+
+  /** 调 Obsidian 渲染一段 markdown，返回 innerHTML 字符串 */
+  private async renderMd(md: string, sourcePath: string, scope: Component): Promise<string> {
+    const holder = createDiv();
+    await MarkdownRenderer.render(this.app, md, holder, sourcePath, scope);
+    return holder.innerHTML;
+  }
+
+  /** inline 节点按类型套壳（标题字号、引用样式等） */
+  private wrapInline(node: MindMapNode, inner: string): string {
+    if (node.type === 'heading') {
+      const level = node.headingLevel || 1;
+      const fontSize = Math.max(1.6 - level * 0.1, 1.0);
+      return `<div class="mm-heading" style="font-size:${fontSize}em;font-weight:600;">${inner}</div>`;
+    }
+    return `<div class="mm-inline mm-${node.type}">${inner}</div>`;
   }
 
   /**
@@ -145,67 +253,14 @@ export class MindMapView extends ItemView {
   }
 
   /**
-   * 渲染当前活动文件
-   */
-  async renderCurrentFile(): Promise<void> {
-    // 优先用 state 里存的文件路径；回退到活动文件
-    let file: TFile | null = null;
-    if (this.filePath) {
-      const f = this.app.vault.getAbstractFileByPath(this.filePath);
-      if (f instanceof TFile) file = f;
-    }
-    if (!file) {
-      const active = this.app.workspace.getActiveFile();
-      if (active && active.extension === 'md') file = active;
-    }
-    if (!file || file.extension !== 'md') return;
-    await this.renderFile(file);
-  }
-
-  /**
-   * 渲染指定文件
-   */
-  async renderFile(file: TFile): Promise<void> {
-    this.currentFile = file;
-    this.filePath = file.path;
-
-    const content = await this.app.vault.cachedRead(file);
-    const blocks = parseMarkdown(content);
-    const root = buildTree(blocks, file.basename);
-    this.currentRoot = root;
-
-    if (this.mm) {
-      this.mm.setData(root);
-      // 等 DOM/容器尺寸稳定后再 fit（ResizeObserver 也会兜底）
-      this.scheduleFit();
-    }
-  }
-
-  /**
-   * 切换回 markdown 编辑模式
-   */
-  private async switchBackToMarkdown(): Promise<void> {
-    if (!this.currentFile) return;
-
-    await this.leaf.setViewState({
-      type: 'markdown',
-      state: { file: this.currentFile.path, mode: 'source' }
-    });
-  }
-
-  /**
    * 跳转到当前文件指定行（切回 markdown 视图并定位）
    */
   private async jumpToLine(line: number): Promise<void> {
     if (!this.currentFile) return;
-
-    // 切回 markdown 编辑模式
     await this.leaf.setViewState({
       type: 'markdown',
-      state: { file: this.currentFile.path, mode: 'source' }
+      state: { file: this.currentFile.path, mode: 'source' },
     });
-
-    // 等待视图切换完成后定位
     setTimeout(() => {
       const view = this.leaf.view;
       if (view instanceof MarkdownView && view.editor) {

@@ -25,7 +25,6 @@ export interface MarkmapController {
 export function createMarkmap(svgEl: SVGSVGElement): MarkmapController {
   const mm = Markmap.create(svgEl, {
     duration: 300,
-    colorFreezeLevel: 3,
     maxWidth: 260,       // 限制宽度，配合 CSS nowrap→normal 触发换行
     initialExpandLevel: 2,
     spacingHorizontal: 40,
@@ -35,7 +34,7 @@ export function createMarkmap(svgEl: SVGSVGElement): MarkmapController {
 
   return {
     setData(root: MindMapNode) {
-      mm.setData(toIMarkmapNode(root));
+      mm.setData(toIMarkmapNode(root) as any);
     },
     fit() {
       mm.fit();
@@ -50,13 +49,15 @@ export function createMarkmap(svgEl: SVGSVGElement): MarkmapController {
 /**
  * 递归把 MindMapNode 转成 markmap 需要的 IMarkmapNode
  */
-export function toIMarkmapNode(node: MindMapNode): IMarkmapNode {
+export function toIMarkmapNode(node: MindMapNode, depth = 0): IMarkmapNode {
   // heading / root / list 节点不折叠；内容节点超过 depth 2 时默认折叠
   const fold = shouldFoldByDefault(node) ? 1 : 0;
 
   return {
+    type: node.type,
+    depth,
     content: node.expanded ? node.fullHtml : node.summaryHtml,
-    children: node.children.map(toIMarkmapNode),
+    children: node.children.map((c) => toIMarkmapNode(c, depth + 1)),
     payload: {
       id: node.id,
       fold,
