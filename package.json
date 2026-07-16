@@ -1,0 +1,26 @@
+{
+  "name": "full-content-mindmap",
+  "version": "0.1.0",
+  "description": "Obsidian plugin: render entire markdown file as a mind map",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production"
+  },
+  "dependencies": {
+    "markmap-lib": "^0.15.3",
+    "markmap-view": "^0.15.3",
+    "markmap-common": "^0.15.3",
+    "remark-gfm": "^3.0.1",
+    "remark-parse": "^10.0.2",
+    "unified": "^10.1.2"
+  },
+  "devDependencies": {
+    "@types/mdast": "4.0.4",
+    "@types/node": "20.14.0",
+    "esbuild": "0.21.5",
+    "obsidian": "latest",
+    "tslib": "2.6.3",
+    "typescript": "5.4.5"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "full-content-mindmap",
+  "name": "Full Content MindMap",
+  "version": "0.1.0",
+  "minAppVersion": "1.0.0",
+  "description": "Render every block of the current markdown file as a mind map — headings, paragraphs, code, tables, images, and more.",
+  "author": "you",
+  "authorUrl": "",
+  "isDesktopOnly": false
+}
