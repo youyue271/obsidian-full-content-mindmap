@@ -75,15 +75,46 @@ export function parseMarkdown(content: string): ParsedBlock[] {
       }
       case 'paragraph': {
         const raw = slice(node);
-        // 纯嵌入段落（仅由 ![[...]] 构成，可能多个连排/换行）→ 拆成独立 embed 块
-        if (/^(?:!\[\[[^\]]+\]\]\s*)+$/.test(raw.trim())) {
-          const embedRe = /!\[\[[^\]]+\]\]/g;
-          let m: RegExpExecArray | null;
-          while ((m = embedRe.exec(raw)) !== null) {
-            blocks.push({ type: 'embed', raw: m[0], startLine: line });
-          }
-        } else {
+        const trimmed = raw.trim();
+
+        // 检测是否包含 ![[...]] 嵌入
+        const hasEmbed = /!\[\[[^\]]+\]\]/.test(trimmed);
+
+        if (!hasEmbed) {
+          // 无嵌入：普通段落
           blocks.push({ type: 'paragraph', raw, startLine: line });
+        } else {
+          // 含嵌入：按 ![[...]] 边界拆分成独立块
+          // "前文\n![[A]]\n![[B]]中间\n![[C]]后文" → [前文, ![[A]], ![[B]], 中间, ![[C]], 后文]
+          const parts: string[] = [];
+          const embedRe = /!\[\[[^\]]+\]\]/g;
+          let lastIndex = 0;
+          let m: RegExpExecArray | null;
+
+          while ((m = embedRe.exec(trimmed)) !== null) {
+            // m.index 前的非 embed 文本
+            if (m.index > lastIndex) {
+              const textPart = trimmed.slice(lastIndex, m.index).trim();
+              if (textPart) parts.push(textPart);
+            }
+            // embed 本身
+            parts.push(m[0]);
+            lastIndex = embedRe.lastIndex;
+          }
+          // 最后剩余的文本
+          if (lastIndex < trimmed.length) {
+            const textPart = trimmed.slice(lastIndex).trim();
+            if (textPart) parts.push(textPart);
+          }
+
+          // 每个 part 生成一个块：embed → embed 节点，text → paragraph 节点
+          parts.forEach((part) => {
+            if (/^!\[\[[^\]]+\]\]$/.test(part)) {
+              blocks.push({ type: 'embed', raw: part, startLine: line });
+            } else {
+              blocks.push({ type: 'paragraph', raw: part, startLine: line });
+            }
+          });
         }
         break;
       }
