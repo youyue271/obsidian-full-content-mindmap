@@ -51,6 +51,11 @@ export class MindMapView extends ItemView {
     setTimeout(() => this.mm?.fit(), 80);
   }
 
+  /** 适应窗口：缩放思维导图到适合视口大小（供命令/快捷键调用） */
+  fit(): void {
+    this.mm?.fit();
+  }
+
   /** 一键翻转所有 embed 节点的展开/收拢状态，无需重新解析文档 */
   private toggleAllEmbeds(): void {
     if (!this.currentRoot) return;

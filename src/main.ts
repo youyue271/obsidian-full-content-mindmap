@@ -29,6 +29,20 @@ export default class FullContentMindMapPlugin extends Plugin {
       },
     });
 
+    // 命令：适应窗口（缩放思维导图到适合视口大小）
+    this.addCommand({
+      id: 'fit-mindmap',
+      name: '思维导图：适应窗口',
+      checkCallback: (checking: boolean) => {
+        const view = this.getActiveMindMapView();
+        if (view) {
+          if (!checking) view.fit();
+          return true;
+        }
+        return false;
+      },
+    });
+
     // 监听活动文件切换
     this.registerEvent(
       this.app.workspace.on('active-leaf-change', () => {
