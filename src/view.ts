@@ -69,7 +69,7 @@ export class MindMapView extends ItemView {
       node.children.forEach(walk);
     };
     walk(this.currentRoot);
-    this.mm?.setData(this.currentRoot);
+    this.mm?.updateContent(this.currentRoot);
     this.scheduleFit();
   }
 
@@ -175,7 +175,7 @@ export class MindMapView extends ItemView {
       const nodeId = nodeEl?.dataset.nodeId;
       if (nodeId) {
         toggleNodeExpansion(this.currentRoot, nodeId);
-        this.mm?.setData(this.currentRoot);
+        this.mm?.updateContent(this.currentRoot);
         this.scheduleFit();
       }
       e.stopPropagation();

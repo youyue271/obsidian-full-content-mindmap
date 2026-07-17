@@ -16,9 +16,11 @@ import type { MindMapNode, IMarkmapNode } from '../types';
 const FULL_EXPAND = -999;
 
 export interface MarkmapController {
+  /** 完整重建（文件渲染或层级变更时调用），按当前 level 重新折叠 */
   setData(root: MindMapNode): void;
+  /** 仅更新节点内容（折叠卡片展开/收拢），保留用户通过折叠圆圈手动设置的折叠状态 */
+  updateContent(root: MindMapNode): void;
   fit(): void;
-  /** 切换展开/收拢模式，level 含义见文件顶部注释 */
   expandTo(level: number): void;
   getLevel(): number;
   destroy(): void;
@@ -70,6 +72,18 @@ export function createMarkmap(svgEl: SVGSVGElement, initialLevel = FULL_EXPAND):
     setData(root: MindMapNode) {
       lastRoot = root;
       apply();
+    },
+    updateContent(root: MindMapNode) {
+      lastRoot = root;
+      // 从 markmap 当前 state.data 中采集 {nodeId → currentFold}，
+      // 再用这些 fold 值重建 IMarkmapNode，保留用户手动设置的折叠状态
+      const liveFolds = new Map<string, number | undefined>();
+      const stateData = (mm as any).state?.data;
+      if (stateData) collectLiveFolds(stateData, liveFolds);
+
+      mm.setData(toIMarkmapNodeWithFolds(root, 0, liveFolds) as any, {
+        initialExpandLevel: -1,
+      });
     },
     fit() {
       mm.fit();
@@ -123,7 +137,6 @@ export function toggleNodeExpansion(root: MindMapNode, nodeId: string): boolean 
 
 /**
  * 计算每个节点的「高度」（到其子树最深叶子的距离，叶子高度 0），写入 map。
- * 返回本节点高度。
  */
 function computeHeights(node: MindMapNode, out: Map<string, number>): number {
   if (node.children.length === 0) {
@@ -133,4 +146,37 @@ function computeHeights(node: MindMapNode, out: Map<string, number>): number {
   const h = 1 + Math.max(...node.children.map((c) => computeHeights(c, out)));
   out.set(node.id, h);
   return h;
+}
+
+/**
+ * 从 markmap 内部的 INode 树递归采集 {payload.id → payload.fold}。
+ * markmap 的 toggleNode 直接改 payload.fold，这里读出来用于 updateContent。
+ */
+function collectLiveFolds(node: any, out: Map<string, number | undefined>): void {
+  const id = node?.payload?.id;
+  if (id) out.set(id, node.payload.fold);
+  if (Array.isArray(node?.children)) {
+    node.children.forEach((c: any) => collectLiveFolds(c, out));
+  }
+}
+
+/**
+ * 重建 IMarkmapNode，内容取自 MindMapNode，fold 取自 liveFolds（保留用户手动折叠状态）。
+ */
+function toIMarkmapNodeWithFolds(
+  node: MindMapNode,
+  depth: number,
+  liveFolds: Map<string, number | undefined>,
+): IMarkmapNode {
+  return {
+    type: node.type,
+    depth,
+    content: node.expanded ? node.fullHtml : node.summaryHtml,
+    children: node.children.map((c) => toIMarkmapNodeWithFolds(c, depth + 1, liveFolds)),
+    payload: {
+      id: node.id,
+      fold: liveFolds.has(node.id) ? liveFolds.get(node.id) : undefined,
+      startLine: node.startLine,
+    },
+  };
 }
