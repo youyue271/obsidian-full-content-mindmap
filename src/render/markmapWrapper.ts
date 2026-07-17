@@ -57,7 +57,13 @@ export function createMarkmap(svgEl: SVGSVGElement, initialLevel = -1): MarkmapC
       mm.fit();
     },
     expandTo(newLevel: number) {
-      level = newLevel;
+      let actualLevel = newLevel;
+      if (newLevel < 0 && lastRoot) {
+        // 负数 = 相对于最大深度的收拢：-1 → maxDepth-1（收拢最后1层）
+        const maxDepth = getMaxDepth(lastRoot);
+        actualLevel = Math.max(1, maxDepth + newLevel);
+      }
+      level = actualLevel;
       apply();
     },
     getLevel() {
@@ -99,4 +105,12 @@ export function toggleNodeExpansion(root: MindMapNode, nodeId: string): boolean 
     if (toggleNodeExpansion(child, nodeId)) return true;
   }
   return false;
+}
+
+/**
+ * 计算树的最大深度（根节点深度为 0）
+ */
+function getMaxDepth(node: MindMapNode, currentDepth = 0): number {
+  if (node.children.length === 0) return currentDepth;
+  return Math.max(...node.children.map((c) => getMaxDepth(c, currentDepth + 1)));
 }

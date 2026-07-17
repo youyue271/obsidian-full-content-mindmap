@@ -118,10 +118,13 @@ export class MindMapView extends ItemView {
     // 展开层级选择器
     toolbar.createEl('span', { text: '展开层级：', cls: 'mm-label' });
     const levelSel = toolbar.createEl('select', { cls: 'mm-select' });
-    levelSel.createEl('option', { value: '-1', text: '全部' });
+    levelSel.createEl('option', { value: '-999', text: '全部' });
     for (let i = 1; i <= 5; i++) {
       levelSel.createEl('option', { value: String(i), text: `第 ${i} 层` });
     }
+    levelSel.createEl('option', { value: '-1', text: '收拢最后1层' });
+    levelSel.createEl('option', { value: '-2', text: '收拢最后2层' });
+    levelSel.createEl('option', { value: '-3', text: '收拢最后3层' });
     levelSel.value = String(this.plugin.settings.defaultExpandLevel);
     levelSel.addEventListener('change', () => {
       const lv = parseInt(levelSel.value, 10);
