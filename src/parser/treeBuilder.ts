@@ -19,6 +19,7 @@ export function buildTree(
   blocks: ParsedBlock[],
   fileName: string,
   excludedHeadings: string[] = [],
+  expandEmbeds = false,
 ): MindMapNode {
   nodeIdCounter = 0;
 
@@ -85,6 +86,8 @@ export function buildTree(
 
       if (block.type === 'listGroup') {
         parent.children.push(buildListGroupNode(block));
+      } else if (block.type === 'embed') {
+        parent.children.push(buildEmbedNode(block, expandEmbeds));
       } else if (block.type === 'blockquote') {
         // 普通 > 引用视为对「上一段/上一节点」的补充：
         // 挂到最近的非引用兄弟节点之下；若没有兄弟则挂到父节点（通常是标题）。
@@ -152,6 +155,26 @@ function buildListGroupNode(block: ParsedBlock): MindMapNode {
     expanded: false,
     startLine: block.startLine,
     children: items,
+  };
+}
+
+/**
+ * 构建嵌入节点：![[X]] → 折叠态显示 [[X]] 双链 + 展开按钮，展开态显示完整嵌入内容
+ */
+function buildEmbedNode(block: ParsedBlock, expandEmbeds: boolean): MindMapNode {
+  // 从 ![[X]] 提取成 [[X]]（去掉开头的 !）
+  const linkForm = block.raw.replace(/^!/, '');
+  return {
+    id: genId(),
+    type: 'embed',
+    renderMode: 'collapsible',
+    markdown: block.raw,           // 展开态：完整 ![[X]] 嵌入
+    collapsedMarkdown: linkForm,   // 折叠态：[[X]] 双链形式
+    summaryHtml: '',
+    fullHtml: '',
+    expanded: expandEmbeds,        // 初始状态：由调用方决定
+    startLine: block.startLine,
+    children: [],
   };
 }
 

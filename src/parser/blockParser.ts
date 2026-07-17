@@ -74,7 +74,17 @@ export function parseMarkdown(content: string): ParsedBlock[] {
         break;
       }
       case 'paragraph': {
-        blocks.push({ type: 'paragraph', raw: slice(node), startLine: line });
+        const raw = slice(node);
+        // 纯嵌入段落（仅由 ![[...]] 构成，可能多个连排/换行）→ 拆成独立 embed 块
+        if (/^(?:!\[\[[^\]]+\]\]\s*)+$/.test(raw.trim())) {
+          const embedRe = /!\[\[[^\]]+\]\]/g;
+          let m: RegExpExecArray | null;
+          while ((m = embedRe.exec(raw)) !== null) {
+            blocks.push({ type: 'embed', raw: m[0], startLine: line });
+          }
+        } else {
+          blocks.push({ type: 'paragraph', raw, startLine: line });
+        }
         break;
       }
       case 'code': {

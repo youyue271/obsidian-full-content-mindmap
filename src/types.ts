@@ -16,6 +16,7 @@ export type BlockType =
   | 'list'       // 单个列表项（listItem），保留嵌套层级
   | 'listGroup'  // 一整个列表的容器（其子节点为各 list 项），使列表作为整体与兄弟段落并列
   | 'image'
+  | 'embed'      // Obsidian 嵌入 ![[...]]，默认按双链渲染、可展开为完整嵌入
   | 'math'       // 独立行内 $$ ... $$ 数学公式
   | 'callout'    // Obsidian callout (> [!NOTE])
   | 'hr'         // thematicBreak
@@ -55,6 +56,12 @@ export interface MindMapNode {
 
   /** collapsible：折叠态摘要卡片 HTML（徽标 + 展开按钮） */
   collapsedHtml?: string;
+
+  /**
+   * collapsible embed 专用：折叠态需要经 Obsidian 渲染的 markdown（如 [[X]] 双链形式）。
+   * 优先于 collapsedHtml；展开态仍用 markdown 字段（![[X]] 完整嵌入）。
+   */
+  collapsedMarkdown?: string;
 
   /** collapsible：展开态直接使用的现成 HTML（代码块用，避免再次围栏） */
   expandedHtml?: string;

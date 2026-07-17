@@ -1,5 +1,5 @@
 /**
- * 插件设置：排除标题等
+ * 插件设置
  */
 
 import { App, PluginSettingTab, Setting } from 'obsidian';
@@ -10,11 +10,14 @@ export interface MindMapSettings {
   excludedHeadings: string[];
   /** 默认展开层级：-1 = 全部展开，1–5 = 展开到该层 */
   defaultExpandLevel: number;
+  /** true（默认）：![[X]] 默认按 [[X]] 双链渲染，可点击展开为完整嵌入；false：直接渲染为嵌入 */
+  embedsAsLinks: boolean;
 }
 
 export const DEFAULT_SETTINGS: MindMapSettings = {
   excludedHeadings: ['相关链接'],
   defaultExpandLevel: -1,
+  embedsAsLinks: true,
 };
 
 export class MindMapSettingTab extends PluginSettingTab {
@@ -44,6 +47,21 @@ export class MindMapSettingTab extends PluginSettingTab {
           await this.plugin.saveData(this.plugin.settings);
           this.plugin.applyExpandLevelToViews(level);
         });
+      });
+
+    new Setting(containerEl)
+      .setName('嵌入链接默认收起')
+      .setDesc(
+        '开启时，![[笔记]] 默认显示为 [[双链]] 形式；底部工具栏可一键全部展开/收拢。' +
+        '关闭则直接渲染嵌入内容。'
+      )
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.embedsAsLinks)
+          .onChange(async (value) => {
+            this.plugin.settings.embedsAsLinks = value;
+            await this.plugin.saveSettings();
+          });
       });
 
     new Setting(containerEl)

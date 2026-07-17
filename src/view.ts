@@ -27,12 +27,16 @@ export class MindMapView extends ItemView {
   private resizeObserver: ResizeObserver | null = null;
   private fitTimer: number | null = null;
   private levelSel: HTMLSelectElement | null = null;
+  private embedBtn: HTMLButtonElement | null = null;
+  /** 当前 embed 节点的展开状态（true = 展开显示嵌入内容） */
+  private embedsExpanded = false;
   /** 承载本轮 markdown 渲染产生的子组件，重渲前整体卸载以避免泄漏 */
   private renderScope: Component | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: FullContentMindMapPlugin) {
     super(leaf);
     this.plugin = plugin;
+    this.embedsExpanded = !plugin.settings.embedsAsLinks;
   }
 
   /** 供命令读取当前文件路径 */
@@ -45,6 +49,23 @@ export class MindMapView extends ItemView {
     if (this.levelSel) this.levelSel.value = String(level);
     this.mm?.expandTo(level);
     setTimeout(() => this.mm?.fit(), 80);
+  }
+
+  /** 一键翻转所有 embed 节点的展开/收拢状态，无需重新解析文档 */
+  private toggleAllEmbeds(): void {
+    if (!this.currentRoot) return;
+    this.embedsExpanded = !this.embedsExpanded;
+    if (this.embedBtn) {
+      this.embedBtn.textContent = this.embedsExpanded ? '收拢引用' : '展开引用';
+    }
+    // 遍历树，把所有 embed 节点切换到新状态
+    const walk = (node: MindMapNode) => {
+      if (node.type === 'embed') node.expanded = this.embedsExpanded;
+      node.children.forEach(walk);
+    };
+    walk(this.currentRoot);
+    this.mm?.setData(this.currentRoot);
+    this.scheduleFit();
   }
 
   async setState(state: any, result: any): Promise<void> {
@@ -103,6 +124,12 @@ export class MindMapView extends ItemView {
       setTimeout(() => this.mm?.fit(), 80);
     });
     this.levelSel = levelSel;
+
+    // 嵌入展开/收拢按钮
+    const embedBtn = toolbar.createEl('button', { cls: 'mm-btn' });
+    embedBtn.textContent = this.embedsExpanded ? '收拢引用' : '展开引用';
+    embedBtn.addEventListener('click', () => this.toggleAllEmbeds());
+    this.embedBtn = embedBtn;
 
     toolbar.createEl('button', { text: '适应窗口', cls: 'mm-btn' })
       .addEventListener('click', () => this.mm?.fit());
@@ -190,7 +217,7 @@ export class MindMapView extends ItemView {
 
     const content = await this.app.vault.cachedRead(file);
     const blocks = parseMarkdown(content);
-    const root = buildTree(blocks, file.basename, this.plugin.settings.excludedHeadings);
+    const root = buildTree(blocks, file.basename, this.plugin.settings.excludedHeadings, this.embedsExpanded);
 
     // 用 Obsidian 渲染每个节点的 markdown 原文 → summaryHtml / fullHtml
     await this.renderNodeHtml(root, file.path);
@@ -239,7 +266,15 @@ export class MindMapView extends ItemView {
     }
 
     // collapsible
-    node.summaryHtml = node.collapsedHtml || `<span data-node-id="${node.id}">…</span>`;
+    if (node.collapsedMarkdown) {
+      // embed 节点：折叠态也需渲染 markdown（[[X]] 双链）
+      const collapsedInner = await this.renderMd(node.collapsedMarkdown, sourcePath, scope);
+      node.summaryHtml =
+        `<div class="mm-embed-link" data-node-id="${node.id}">${collapsedInner}` +
+        `<button class="expand-btn">展开</button></div>`;
+    } else {
+      node.summaryHtml = node.collapsedHtml || `<span data-node-id="${node.id}">…</span>`;
+    }
     const inner = node.expandedHtml ?? await this.renderMd(node.markdown || '', sourcePath, scope);
     node.fullHtml =
       `<div class="mm-expanded" data-node-id="${node.id}">${inner}` +
