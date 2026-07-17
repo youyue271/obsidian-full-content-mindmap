@@ -40,25 +40,27 @@ export function buildTree(
     .filter((h) => h.length > 0);
 
   const stack: MindMapNode[] = [root];
-  // 当前正在被排除的标题层级；null 表示未处于排除态
   let skipLevel: number | null = null;
+  // 冒号结尾段落作为「分组父节点」：其后的内容作为它的子节点，
+  // 直到遇到下一个冒号段落（重置到标题级别）或新标题
+  let colonParent: MindMapNode | null = null;
 
   for (const block of blocks) {
     if (block.type === 'heading') {
       const level = block.headingLevel!;
 
-      // 若处于排除态：遇到同级或更高级标题才结束排除，否则继续跳过
       if (skipLevel !== null) {
         if (level > skipLevel) continue;
         skipLevel = null;
       }
 
-      // 命中排除名单：跳过该标题及其下所有内容，直到出现同级/更高级标题
       if (excludeSet.includes(normalizeHeading(block.raw))) {
         skipLevel = level;
         continue;
       }
 
+      // 新标题：重置冒号父节点
+      colonParent = null;
       while (stack.length > 1) {
         const top = stack[stack.length - 1];
         if (top.type === 'heading' && top.headingLevel! >= level) stack.pop();
@@ -79,18 +81,27 @@ export function buildTree(
       stack.push(headingNode);
 
     } else {
-      // 非标题内容：处于排除态时一并跳过
       if (skipLevel !== null) continue;
 
-      const parent = stack[stack.length - 1];
+      // 冒号段落：始终挂到标题层（与其它冒号段落并列），并成为新的冒号父节点
+      const isColonParagraph = block.type === 'paragraph' &&
+        /[：:]\s*$/.test(block.raw.trim());
+
+      if (isColonParagraph) {
+        const node = buildBlockNode(block);
+        stack[stack.length - 1].children.push(node);
+        colonParent = node;
+        continue;
+      }
+
+      // 其余内容：有冒号父节点时挂到它下面，否则挂到标题
+      const parent = colonParent ?? stack[stack.length - 1];
 
       if (block.type === 'listGroup') {
         parent.children.push(buildListGroupNode(block));
       } else if (block.type === 'embed') {
         parent.children.push(buildEmbedNode(block, expandEmbeds));
       } else if (block.type === 'blockquote') {
-        // 普通 > 引用视为对「上一段/上一节点」的补充：
-        // 挂到最近的非引用兄弟节点之下；若没有兄弟则挂到父节点（通常是标题）。
         const node = buildBlockNode(block);
         node.isSupplement = true;
         const anchor = lastNonQuoteChild(parent) ?? parent;
