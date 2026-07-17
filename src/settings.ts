@@ -16,7 +16,7 @@ export interface MindMapSettings {
 
 export const DEFAULT_SETTINGS: MindMapSettings = {
   excludedHeadings: ['相关链接'],
-  defaultExpandLevel: -1,
+  defaultExpandLevel: -999, // -999 = 全部展开
   embedsAsLinks: true,
 };
 
@@ -36,10 +36,13 @@ export class MindMapSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('默认展开层级')
-      .setDesc('打开思维导图时默认展开到第几层。「全部展开」会展示整篇文档的所有节点。')
+      .setDesc('打开思维导图时默认的展开/收拢模式。「收拢最后 N 层」隐藏最深的 N 层叶子节点。')
       .addDropdown((dd) => {
-        dd.addOption('-1', '全部展开');
+        dd.addOption('-999', '全部展开');
         for (let i = 1; i <= 5; i++) dd.addOption(String(i), `第 ${i} 层`);
+        dd.addOption('-1', '收拢最后1层');
+        dd.addOption('-2', '收拢最后2层');
+        dd.addOption('-3', '收拢最后3层');
         dd.setValue(String(this.plugin.settings.defaultExpandLevel));
         dd.onChange(async (value) => {
           const level = parseInt(value, 10);
