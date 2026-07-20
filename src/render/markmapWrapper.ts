@@ -23,21 +23,31 @@ export interface MarkmapController {
   fit(): void;
   expandTo(level: number): void;
   getLevel(): number;
-  /** 更新节点最大宽度（设置变更时调用），随后需重新 setData 生效 */
-  setMaxWidth(w: number): void;
+  /** 更新布局参数（宽度/间距，设置变更时调用），随后需重新 setData 生效 */
+  setSpacing(maxWidth: number, spacingVertical: number, spacingHorizontal: number): void;
   destroy(): void;
 }
 
-export function createMarkmap(svgEl: SVGSVGElement, initialLevel = FULL_EXPAND, maxWidth = 360): MarkmapController {
+export interface MarkmapLayoutOpts {
+  maxWidth?: number;
+  spacingVertical?: number;
+  spacingHorizontal?: number;
+}
+
+export function createMarkmap(
+  svgEl: SVGSVGElement,
+  initialLevel = FULL_EXPAND,
+  layout: MarkmapLayoutOpts = {},
+): MarkmapController {
   let level = initialLevel;
   let lastRoot: MindMapNode | null = null;
 
   const mm = Markmap.create(svgEl, {
     duration: 300,
-    maxWidth,
+    maxWidth: layout.maxWidth ?? 360,
     initialExpandLevel: -1,   // 由 apply() 统一管控，这里只设初始值
-    spacingHorizontal: 40,
-    spacingVertical: 6,
+    spacingHorizontal: layout.spacingHorizontal ?? 40,
+    spacingVertical: layout.spacingVertical ?? 6,
     paddingX: 12,
   });
 
@@ -97,8 +107,8 @@ export function createMarkmap(svgEl: SVGSVGElement, initialLevel = FULL_EXPAND, 
     getLevel() {
       return level;
     },
-    setMaxWidth(w: number) {
-      mm.setOptions({ maxWidth: w });
+    setSpacing(maxWidth: number, spacingVertical: number, spacingHorizontal: number) {
+      mm.setOptions({ maxWidth, spacingVertical, spacingHorizontal });
       apply();
     },
     destroy() {

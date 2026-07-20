@@ -14,6 +14,14 @@ export interface MindMapSettings {
   embedsAsLinks: boolean;
   /** 节点最大宽度（px）：同时作用于 markmap 布局与节点内容换行 */
   nodeMaxWidth: number;
+  /** 节点字号（px） */
+  fontSize: number;
+  /** 行高（倍数） */
+  lineHeight: number;
+  /** 同级节点垂直间距（px） */
+  spacingVertical: number;
+  /** 层级间水平间距（px） */
+  spacingHorizontal: number;
 }
 
 export const DEFAULT_SETTINGS: MindMapSettings = {
@@ -21,6 +29,10 @@ export const DEFAULT_SETTINGS: MindMapSettings = {
   defaultExpandLevel: -999, // -999 = 全部展开
   embedsAsLinks: true,
   nodeMaxWidth: 360,
+  fontSize: 14,
+  lineHeight: 1.5,
+  spacingVertical: 6,
+  spacingHorizontal: 40,
 };
 
 export class MindMapSettingTab extends PluginSettingTab {
@@ -81,6 +93,74 @@ export class MindMapSettingTab extends PluginSettingTab {
             const n = parseInt(value, 10);
             if (!Number.isFinite(n) || n < 100) return; // 忽略非法值
             this.plugin.settings.nodeMaxWidth = n;
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.type = 'number';
+        text.inputEl.style.width = '80px';
+      });
+
+    new Setting(containerEl)
+      .setName('字号')
+      .setDesc('节点文字大小（像素）。默认 14。')
+      .addText((text) => {
+        text
+          .setPlaceholder('14')
+          .setValue(String(this.plugin.settings.fontSize))
+          .onChange(async (value) => {
+            const n = parseInt(value, 10);
+            if (!Number.isFinite(n) || n < 8 || n > 40) return;
+            this.plugin.settings.fontSize = n;
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.type = 'number';
+        text.inputEl.style.width = '80px';
+      });
+
+    new Setting(containerEl)
+      .setName('行高')
+      .setDesc('节点内文字行高（倍数）。默认 1.5。')
+      .addText((text) => {
+        text
+          .setPlaceholder('1.5')
+          .setValue(String(this.plugin.settings.lineHeight))
+          .onChange(async (value) => {
+            const n = parseFloat(value);
+            if (!Number.isFinite(n) || n < 1 || n > 3) return;
+            this.plugin.settings.lineHeight = n;
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.type = 'number';
+        text.inputEl.style.width = '80px';
+      });
+
+    new Setting(containerEl)
+      .setName('节点垂直间距')
+      .setDesc('同层节点之间的垂直间距（像素）。默认 6。')
+      .addText((text) => {
+        text
+          .setPlaceholder('6')
+          .setValue(String(this.plugin.settings.spacingVertical))
+          .onChange(async (value) => {
+            const n = parseInt(value, 10);
+            if (!Number.isFinite(n) || n < 0 || n > 100) return;
+            this.plugin.settings.spacingVertical = n;
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.type = 'number';
+        text.inputEl.style.width = '80px';
+      });
+
+    new Setting(containerEl)
+      .setName('层级水平间距')
+      .setDesc('父子层级之间的水平间距（像素）。默认 40。')
+      .addText((text) => {
+        text
+          .setPlaceholder('40')
+          .setValue(String(this.plugin.settings.spacingHorizontal))
+          .onChange(async (value) => {
+            const n = parseInt(value, 10);
+            if (!Number.isFinite(n) || n < 0 || n > 200) return;
+            this.plugin.settings.spacingHorizontal = n;
             await this.plugin.saveSettings();
           });
         text.inputEl.type = 'number';

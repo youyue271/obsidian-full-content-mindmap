@@ -47,8 +47,8 @@
   white-space: normal !important;
   word-break: break-word !important;
   overflow-wrap: break-word !important;
-  font-size: 14px !important;
-  line-height: 1.5 !important;
+  font-size: var(--mm-font-size, 14px) !important;
+  line-height: var(--mm-line-height, 1.5) !important;
   font-family: var(--font-text, var(--font-interface)) !important;
   color: var(--text-normal) !important;
   max-width: var(--mm-node-width, 360px);
@@ -319,35 +319,45 @@
   border-radius: 4px;
 }
 
-/* 展开的 ![[X]] 嵌入：Obsidian 的 .markdown-embed 自带大边距/内边距，收紧 */
-.mm-card-body .markdown-embed,
-.mm-inline .markdown-embed {
-  margin: 0;
-  padding: 0 0 0 8px;
+/* 展开的 ![[X]] 嵌入：Obsidian 的 .internal-embed / .markdown-embed 自带很大的
+   min-height、边距、内边距（那一大块空白就来自这里）。在 .markmap-foreign 作用域下
+   （渲染与测量容器都带此 class）统一收紧。 */
+.markmap-foreign .internal-embed,
+.markmap-foreign .markdown-embed {
+  margin: 0 !important;
+  padding: 0 0 0 8px !important;
+  min-height: 0 !important;
   border-left: 2px solid var(--background-modifier-border);
 }
 
-.mm-card-body .markdown-embed-content,
-.mm-inline .markdown-embed-content {
-  max-height: none;
-  padding: 0;
+.markmap-foreign .markdown-embed-content {
+  max-height: none !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
 }
 
-.mm-card-body .markdown-embed-content > :first-child,
-.mm-inline .markdown-embed-content > :first-child {
-  margin-top: 0;
+.markmap-foreign .markdown-embed-content > :first-child,
+.markmap-foreign .markdown-preview-view > :first-child {
+  margin-top: 0 !important;
 }
 
-.mm-card-body .markdown-embed-content > :last-child,
-.mm-inline .markdown-embed-content > :last-child {
-  margin-bottom: 0;
+.markmap-foreign .markdown-embed-content > :last-child,
+.markmap-foreign .markdown-preview-view > :last-child {
+  margin-bottom: 0 !important;
+}
+
+/* 嵌入内的 preview 容器也自带 padding */
+.markmap-foreign .markdown-preview-view,
+.markmap-foreign .markdown-preview-sizer {
+  padding: 0 !important;
+  min-height: 0 !important;
 }
 
 /* 嵌入标题（文件名链接）通常不需要，压缩其间距 */
-.mm-card-body .markdown-embed-title,
-.mm-inline .markdown-embed-title {
-  margin: 0;
-  line-height: 1.3;
+.markmap-foreign .markdown-embed-title {
+  margin: 0 !important;
+  line-height: 1.3 !important;
 }
 
 /* 分割线 */
