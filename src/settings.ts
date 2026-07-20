@@ -12,12 +12,15 @@ export interface MindMapSettings {
   defaultExpandLevel: number;
   /** true（默认）：![[X]] 默认按 [[X]] 双链渲染，可点击展开为完整嵌入；false：直接渲染为嵌入 */
   embedsAsLinks: boolean;
+  /** 节点最大宽度（px）：同时作用于 markmap 布局与节点内容换行 */
+  nodeMaxWidth: number;
 }
 
 export const DEFAULT_SETTINGS: MindMapSettings = {
   excludedHeadings: ['相关链接'],
   defaultExpandLevel: -999, // -999 = 全部展开
   embedsAsLinks: true,
+  nodeMaxWidth: 360,
 };
 
 export class MindMapSettingTab extends PluginSettingTab {
@@ -65,6 +68,23 @@ export class MindMapSettingTab extends PluginSettingTab {
             this.plugin.settings.embedsAsLinks = value;
             await this.plugin.saveSettings();
           });
+      });
+
+    new Setting(containerEl)
+      .setName('节点最大宽度')
+      .setDesc('单个节点内容的最大宽度（像素）。同时影响长段落、代码、表格、嵌入展开后的宽度。默认 360。')
+      .addText((text) => {
+        text
+          .setPlaceholder('360')
+          .setValue(String(this.plugin.settings.nodeMaxWidth))
+          .onChange(async (value) => {
+            const n = parseInt(value, 10);
+            if (!Number.isFinite(n) || n < 100) return; // 忽略非法值
+            this.plugin.settings.nodeMaxWidth = n;
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.type = 'number';
+        text.inputEl.style.width = '80px';
       });
 
     new Setting(containerEl)

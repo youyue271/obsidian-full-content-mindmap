@@ -102,6 +102,9 @@ export class MindMapView extends ItemView {
     const container = this.containerEl.children[1] as HTMLElement;
     container.empty();
     container.addClass('full-mindmap-container');
+    // 节点宽度：同时驱动 markmap 布局与 CSS max-width（通过 CSS 变量）
+    const nodeWidth = this.plugin.settings.nodeMaxWidth;
+    container.style.setProperty('--mm-node-width', `${nodeWidth}px`);
 
     const svgWrap = container.createDiv({ cls: 'mm-svg-wrap' });
     this.svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg') as SVGSVGElement;
@@ -109,7 +112,7 @@ export class MindMapView extends ItemView {
     this.svgEl.style.height = '100%';
     svgWrap.appendChild(this.svgEl);
 
-    this.mm = createMarkmap(this.svgEl, this.plugin.settings.defaultExpandLevel);
+    this.mm = createMarkmap(this.svgEl, this.plugin.settings.defaultExpandLevel, nodeWidth);
 
     // 容器尺寸变化时（打开、拖拽面板、窗口 resize）防抖重新适应窗口
     this.resizeObserver = new ResizeObserver(() => this.scheduleFit());
@@ -321,6 +324,11 @@ export class MindMapView extends ItemView {
     this.currentFile = file;
     this.filePath = file.path;
     this.lastRenderedPath = file.path;
+
+    // 每次渲染前应用节点宽度设置（CSS 变量 + markmap maxWidth），使设置变更即时生效
+    const nodeWidth = this.plugin.settings.nodeMaxWidth;
+    (this.containerEl.children[1] as HTMLElement)?.style.setProperty('--mm-node-width', `${nodeWidth}px`);
+    this.mm?.setMaxWidth(nodeWidth);
 
     const content = await this.app.vault.cachedRead(file);
     const blocks = parseMarkdown(content);
