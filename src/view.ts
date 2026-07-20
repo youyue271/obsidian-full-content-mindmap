@@ -32,6 +32,8 @@ export class MindMapView extends ItemView {
   private embedsExpanded = false;
   /** 承载本轮 markdown 渲染产生的子组件，重渲前整体卸载以避免泄漏 */
   private renderScope: Component | null = null;
+  /** 当前打开的行内编辑浮层（双击节点编辑源文件） */
+  private editOverlay: HTMLElement | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: FullContentMindMapPlugin) {
     super(leaf);
@@ -146,6 +148,9 @@ export class MindMapView extends ItemView {
 
     svgWrap.addEventListener('click', (e: MouseEvent) => this.handleSvgClick(e));
 
+    // 双击节点 → 编辑源文件。capture 阶段拦截，先于 markmap 的 dblclick stopPropagation
+    svgWrap.addEventListener('dblclick', (e: MouseEvent) => this.handleDblClick(e), true);
+
     await this.renderCurrentFile();
   }
 
@@ -160,6 +165,7 @@ export class MindMapView extends ItemView {
       this.removeChild(this.renderScope);
       this.renderScope = null;
     }
+    this.closeEditor();
     this.mm?.destroy();
     this.mm = null;
   }
@@ -203,6 +209,104 @@ export class MindMapView extends ItemView {
       e.stopPropagation();
       e.preventDefault();
     }
+  }
+
+  /** 双击节点 → 弹出编辑框修改源文件对应块 */
+  private handleDblClick(e: MouseEvent): void {
+    const target = e.target as HTMLElement;
+    // 双击链接/按钮不进入编辑
+    if (target.closest('a, button')) return;
+
+    const nodeEl = target.closest('[data-node-id]') as HTMLElement | null;
+    const nodeId = nodeEl?.dataset.nodeId;
+    if (!nodeId || !this.currentRoot) return;
+
+    const node = this.findNodeById(this.currentRoot, nodeId);
+    if (!node || node.rawForEdit === undefined) return; // 不可编辑的节点忽略
+
+    e.stopPropagation();
+    e.preventDefault();
+    this.openEditor(node, e.clientX, e.clientY);
+  }
+
+  /** 打开浮动编辑框 */
+  private openEditor(node: MindMapNode, clientX: number, clientY: number): void {
+    this.closeEditor();
+
+    const overlay = this.containerEl.createDiv({ cls: 'mm-edit-overlay' });
+    const rect = this.containerEl.getBoundingClientRect();
+
+    const textarea = overlay.createEl('textarea', { cls: 'mm-edit-textarea' });
+    textarea.value = node.rawForEdit ?? '';
+
+    const bar = overlay.createDiv({ cls: 'mm-edit-bar' });
+    bar.createSpan({ cls: 'mm-edit-hint', text: 'Ctrl+Enter 保存 · Esc 取消' });
+    const saveBtn = bar.createEl('button', { cls: 'mm-btn', text: '保存' });
+    const cancelBtn = bar.createEl('button', { cls: 'mm-btn', text: '取消' });
+
+    // 定位在点击处附近，钳制在容器内
+    const w = 360, h = 180;
+    let left = clientX - rect.left + 8;
+    let top = clientY - rect.top + 8;
+    left = Math.max(4, Math.min(left, rect.width - w - 4));
+    top = Math.max(4, Math.min(top, rect.height - h - 4));
+    overlay.style.left = `${left}px`;
+    overlay.style.top = `${top}px`;
+
+    this.editOverlay = overlay;
+
+    const save = () => this.saveNodeEdit(node, textarea.value);
+    saveBtn.addEventListener('click', save);
+    cancelBtn.addEventListener('click', () => this.closeEditor());
+    textarea.addEventListener('keydown', (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        this.closeEditor();
+      } else if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) {
+        ev.preventDefault();
+        save();
+      }
+    });
+
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  }
+
+  private closeEditor(): void {
+    if (this.editOverlay) {
+      this.editOverlay.remove();
+      this.editOverlay = null;
+    }
+  }
+
+  /** 保存编辑：把新内容写回源文件对应行范围，然后重渲 */
+  private async saveNodeEdit(node: MindMapNode, newText: string): Promise<void> {
+    this.closeEditor();
+    if (!this.currentFile) return;
+
+    const original = node.rawForEdit ?? '';
+    if (newText === original) return; // 无改动
+
+    await this.app.vault.process(this.currentFile, (content) => {
+      const lines = content.split('\n');
+      // startLine~endLine（含）替换为新内容的行
+      const before = lines.slice(0, node.startLine);
+      const after = lines.slice(node.endLine + 1);
+      return [...before, ...newText.split('\n'), ...after].join('\n');
+    });
+
+    // 立即重渲（vault.on('modify') 也会触发，但有防抖延迟）
+    await this.renderCurrentFile();
+  }
+
+  /** 按 id 在树中查找节点 */
+  private findNodeById(root: MindMapNode, id: string): MindMapNode | null {
+    if (root.id === id) return root;
+    for (const child of root.children) {
+      const found = this.findNodeById(child, id);
+      if (found) return found;
+    }
+    return null;
   }
 
   async renderCurrentFile(): Promise<void> {
@@ -301,10 +405,10 @@ export class MindMapView extends ItemView {
     if (node.type === 'heading') {
       const level = node.headingLevel || 1;
       const fontSize = Math.max(1.6 - level * 0.1, 1.0);
-      return `<div class="mm-heading" style="font-size:${fontSize}em;font-weight:600;">${inner}</div>`;
+      return `<div class="mm-heading" data-node-id="${node.id}" style="font-size:${fontSize}em;font-weight:600;">${inner}</div>`;
     }
     const supplementClass = node.isSupplement ? ' mm-supplement' : '';
-    return `<div class="mm-inline mm-${node.type}${supplementClass}">${inner}</div>`;
+    return `<div class="mm-inline mm-${node.type}${supplementClass}" data-node-id="${node.id}">${inner}</div>`;
   }
 
   /**

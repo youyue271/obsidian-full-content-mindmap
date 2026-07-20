@@ -17,8 +17,10 @@ export interface ParsedBlock {
   type: BlockType;
   headingLevel?: number;
   raw: string;              // 源文件原文切片（含 markdown 语法）
+  rawEdit?: string;         // 写回文件用的完整原文（code 含围栏、list 含标记）；缺省用 raw
   lang?: string;            // 仅 code：语言标识
-  startLine: number;        // 0-based 行号
+  startLine: number;        // 0-based 起始行号
+  endLine: number;          // 0-based 结束行号（写回时替换 startLine~endLine）
   children?: ParsedBlock[]; // listGroup：列表项；list：嵌套子项
 }
 
@@ -63,14 +65,20 @@ export function parseMarkdown(content: string): ParsedBlock[] {
     return node.position?.start.line ? node.position.start.line - 1 : fallback;
   }
 
+  function endLineOf(node: Content, fallback: number): number {
+    return node.position?.end.line ? node.position.end.line - 1 : fallback;
+  }
+
   function visitNode(node: Content, index: number) {
     const line = lineOf(node, index);
+    const endLine = endLineOf(node, line);
 
     // 用 string 判别：math 等由额外插件注入的节点类型不在 mdast Content 联合里
     switch (node.type as string) {
       case 'heading': {
         const h = node as Heading;
-        blocks.push({ type: 'heading', headingLevel: h.depth, raw: slice(node), startLine: line });
+        const raw = slice(node);
+        blocks.push({ type: 'heading', headingLevel: h.depth, raw, startLine: line, endLine, rawEdit: raw });
         break;
       }
       case 'paragraph': {
@@ -81,8 +89,8 @@ export function parseMarkdown(content: string): ParsedBlock[] {
         const hasEmbed = /!\[\[[^\]]+\]\]/.test(trimmed);
 
         if (!hasEmbed) {
-          // 无嵌入：普通段落
-          blocks.push({ type: 'paragraph', raw, startLine: line });
+          // 无嵌入：普通段落（整段可编辑）
+          blocks.push({ type: 'paragraph', raw, startLine: line, endLine, rawEdit: raw });
         } else {
           // 含嵌入：按 ![[...]] 边界拆分成独立块
           // "前文\n![[A]]\n![[B]]中间\n![[C]]后文" → [前文, ![[A]], ![[B]], 中间, ![[C]], 后文]
@@ -110,9 +118,9 @@ export function parseMarkdown(content: string): ParsedBlock[] {
           // 每个 part 生成一个块：embed → embed 节点，text → paragraph 节点
           parts.forEach((part) => {
             if (/^!\[\[[^\]]+\]\]$/.test(part)) {
-              blocks.push({ type: 'embed', raw: part, startLine: line });
+              blocks.push({ type: 'embed', raw: part, startLine: line, endLine });
             } else {
-              blocks.push({ type: 'paragraph', raw: part, startLine: line });
+              blocks.push({ type: 'paragraph', raw: part, startLine: line, endLine, rawEdit: part });
             }
           });
         }
@@ -120,8 +128,9 @@ export function parseMarkdown(content: string): ParsedBlock[] {
       }
       case 'code': {
         // raw 只保留代码正文，语言单独存，展开时由 view 重新围栏以获得高亮
+        // rawEdit 用完整原文（含 ``` 围栏），供编辑回写
         const c = node as any;
-        blocks.push({ type: 'code', raw: c.value ?? '', lang: c.lang || '', startLine: line });
+        blocks.push({ type: 'code', raw: c.value ?? '', lang: c.lang || '', startLine: line, endLine, rawEdit: slice(node) });
         break;
       }
       case 'blockquote': {
@@ -130,7 +139,8 @@ export function parseMarkdown(content: string): ParsedBlock[] {
         // Obsidian callout: > [!TYPE]
         const isCallout = first?.type === 'paragraph' &&
           /^\[![\w-]+\]/.test(slice(first).trim().replace(/^>\s*/, ''));
-        blocks.push({ type: isCallout ? 'callout' : 'blockquote', raw: slice(node), startLine: line });
+        const raw = slice(node);
+        blocks.push({ type: isCallout ? 'callout' : 'blockquote', raw, startLine: line, endLine, rawEdit: raw });
         break;
       }
       case 'list': {
@@ -141,25 +151,28 @@ export function parseMarkdown(content: string): ParsedBlock[] {
           type: 'listGroup',
           raw: '',
           startLine: line,
+          endLine,
           children: parseListItems(list.children, line),
         });
         break;
       }
       case 'table': {
-        blocks.push({ type: 'table', raw: slice(node), startLine: line });
+        const raw = slice(node);
+        blocks.push({ type: 'table', raw, startLine: line, endLine, rawEdit: raw });
         break;
       }
       case 'html': {
-        blocks.push({ type: 'html', raw: slice(node), startLine: line });
+        blocks.push({ type: 'html', raw: slice(node), startLine: line, endLine });
         break;
       }
       case 'thematicBreak': {
-        blocks.push({ type: 'hr', raw: '---', startLine: line });
+        blocks.push({ type: 'hr', raw: '---', startLine: line, endLine });
         break;
       }
       case 'math': {
         // @ts-ignore remark 插件可能注入 math 节点
-        blocks.push({ type: 'math', raw: slice(node), startLine: line });
+        const raw = slice(node);
+        blocks.push({ type: 'math', raw, startLine: line, endLine, rawEdit: raw });
         break;
       }
       // paragraph 内的图片会被当作段落处理；独立图片行也是 paragraph，交给 Obsidian 渲染
@@ -172,22 +185,20 @@ export function parseMarkdown(content: string): ParsedBlock[] {
   function parseListItems(items: ListItem[], parentLine: number): ParsedBlock[] {
     return items.map((item, i) => {
       const line = lineOf(item, parentLine + i);
+      const itemEndLine = item.position?.end.line ? item.position.end.line - 1 : line;
 
-      // 找嵌套子列表，作为该项的边界与子节点
       const nested = item.children.find((c: any) => c.type === 'list') as List | undefined;
 
-      // 该项自身原文 = [item.start, nested?.start ?? item.end)
       const itemStart = item.position?.start.offset ?? 0;
       const itemEnd = item.position?.end.offset ?? itemStart;
       const boundary = nested?.position?.start.offset ?? itemEnd;
       let text = src.slice(itemStart, boundary);
-
-      // 去掉行首列表标记（- / * / + / 1.）与缩进，保留 [ ] / [x] 任务标记
+      const rawEdit = text; // 含列表标记的原文，用于写回
       text = dedentListItem(text);
 
       const children = nested ? parseListItems(nested.children, line) : undefined;
 
-      return { type: 'list', raw: text, startLine: line, children } as ParsedBlock;
+      return { type: 'list', raw: text, rawEdit, startLine: line, endLine: itemEndLine, children } as ParsedBlock;
     });
   }
 

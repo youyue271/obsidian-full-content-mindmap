@@ -32,6 +32,7 @@ export function buildTree(
     fullHtml: '',
     expanded: false,
     startLine: 0,
+    endLine: 0,
     children: [],
   };
 
@@ -75,6 +76,7 @@ export function buildTree(
         fullHtml: '',
         expanded: false,
         startLine: block.startLine,
+        endLine: block.endLine,
         children: [],
       }, block);
       stack[stack.length - 1].children.push(headingNode);
@@ -146,6 +148,7 @@ function buildBlockNode(block: ParsedBlock): MindMapNode {
     fullHtml: '',
     expanded: false,
     startLine: block.startLine,
+    endLine: block.endLine,
     children: [],
   }, block);
 }
@@ -165,6 +168,7 @@ function buildListGroupNode(block: ParsedBlock): MindMapNode {
     fullHtml: '',
     expanded: false,
     startLine: block.startLine,
+    endLine: block.endLine,
     children: items,
   };
 }
@@ -185,6 +189,8 @@ function buildEmbedNode(block: ParsedBlock, expandEmbeds: boolean): MindMapNode 
     fullHtml: '',
     expanded: expandEmbeds,        // 初始状态：由调用方决定
     startLine: block.startLine,
+    endLine: block.endLine,
+    // 嵌入不可编辑：同一行可能有多个 ![[]]，共享行号，单独改会误伤兄弟
     children: [],
   };
 }
@@ -201,6 +207,8 @@ function buildListNode(block: ParsedBlock): MindMapNode {
     fullHtml: '',
     expanded: false,
     startLine: block.startLine,
+    endLine: block.endLine,
+    rawForEdit: block.rawEdit ?? block.raw,  // 可编辑：含标记的列表项原文
     children,
   };
 }
@@ -216,6 +224,7 @@ function configureNode(node: MindMapNode, block: ParsedBlock): MindMapNode {
       // 去掉行首 # 只渲染标题文字（保留其中的双链/格式），字号随层级
       node.markdown = block.raw.replace(/^#{1,6}\s+/, '');
       node.renderMode = 'inline';
+      node.rawForEdit = block.rawEdit ?? block.raw; // 编辑时含 # 前缀
       return node;
     }
 
@@ -231,6 +240,7 @@ function configureNode(node: MindMapNode, block: ParsedBlock): MindMapNode {
         node.collapsedHtml =
           `<span data-node-id="${node.id}">${preview}… <button class="expand-btn">展开</button></span>`;
       }
+      node.rawForEdit = block.rawEdit ?? block.raw;
       return node;
     }
 
@@ -245,6 +255,7 @@ function configureNode(node: MindMapNode, block: ParsedBlock): MindMapNode {
       // 展开时重新围栏交给 Obsidian 渲染（获得语法高亮）
       const fence = '```' + (block.lang || '') + '\n' + block.raw + '\n```';
       node.markdown = fence;
+      node.rawForEdit = block.rawEdit ?? fence; // 编辑时含围栏
       return node;
     }
 
@@ -256,6 +267,7 @@ function configureNode(node: MindMapNode, block: ParsedBlock): MindMapNode {
       node.collapsedHtml = `<div class="table-summary" data-node-id="${node.id}">` +
         `📊 表格 (${rows}×${cols})<button class="expand-btn">展开</button></div>`;
       node.markdown = block.raw; // 展开时渲染为真正的 HTML 表格
+      node.rawForEdit = block.rawEdit ?? block.raw;
       return node;
     }
 
@@ -265,7 +277,15 @@ function configureNode(node: MindMapNode, block: ParsedBlock): MindMapNode {
       return node;
     }
 
-    // blockquote / callout / image / math / html → inline，直接渲染原文
+    case 'blockquote':
+    case 'callout': {
+      node.renderMode = 'inline';
+      node.markdown = block.raw;
+      node.rawForEdit = block.rawEdit ?? block.raw; // 引用/callout 可编辑
+      return node;
+    }
+
+    // image / math / html → inline，直接渲染原文（暂不支持编辑）
     default: {
       node.renderMode = 'inline';
       node.markdown = block.raw;

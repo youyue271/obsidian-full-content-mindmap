@@ -78,8 +78,17 @@ export interface MindMapNode {
   /** 是否为"补充说明"节点（如 > 引用），渲染时加视觉标记挂在上一节点下方 */
   isSupplement?: boolean;
 
-  /** 该块在源文件中的起始行（0-based），用于点击跳转 */
+  /** 该块在源文件中的起始行（0-based） */
   startLine: number;
+
+  /** 该块在源文件中的结束行（0-based），用于写回文件时确定替换范围 */
+  endLine: number;
+
+  /**
+   * 用户可编辑的原始 markdown 文本（与文件内容对应，写回时直接替换 startLine~endLine）。
+   * undefined 表示该节点不可编辑（listGroup 容器、hr、html、embed、root）。
+   */
+  rawForEdit?: string;
 
   /** 子节点 */
   children: MindMapNode[];
