@@ -1,5 +1,5 @@
 node_modules/
 main.js
-styles.css
+/styles.css
 dist/
 *.js.map
