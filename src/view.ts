@@ -75,11 +75,10 @@ export class MindMapView extends ItemView {
   }
 
   async setState(state: any, result: any): Promise<void> {
-    const newPath: string | undefined = state?.file;
-    if (newPath) this.filePath = newPath;
+    if (state?.file) this.filePath = state.file;
     await super.setState(state, result);
-    // 只在绑定的文件真正发生变化时才重渲，避免窗口切换焦点导致的重复渲染
-    if (newPath && newPath === this.lastRenderedPath) return;
+    // 跳过重渲：绑定文件没变（包括 Obsidian 传入空 state 的 focus 事件）
+    if (this.filePath && this.filePath === this.lastRenderedPath) return;
     await this.renderCurrentFile();
   }
 
@@ -312,17 +311,10 @@ export class MindMapView extends ItemView {
   }
 
   async renderCurrentFile(): Promise<void> {
-    let file: TFile | null = null;
-    if (this.filePath) {
-      const f = this.app.vault.getAbstractFileByPath(this.filePath);
-      if (f instanceof TFile) file = f;
-    }
-    if (!file) {
-      const active = this.app.workspace.getActiveFile();
-      if (active && active.extension === 'md') file = active;
-    }
-    if (!file || file.extension !== 'md') return;
-    await this.renderFile(file);
+    if (!this.filePath) return;
+    const f = this.app.vault.getAbstractFileByPath(this.filePath);
+    if (!(f instanceof TFile) || f.extension !== 'md') return;
+    await this.renderFile(f);
   }
 
   async renderFile(file: TFile): Promise<void> {
