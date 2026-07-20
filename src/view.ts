@@ -64,9 +64,9 @@ export class MindMapView extends ItemView {
     if (this.embedBtn) {
       this.embedBtn.textContent = this.embedsExpanded ? '收拢引用' : '展开引用';
     }
-    // 遍历树，把所有 embed 节点切换到新状态
+    // 遍历树，把所有 embed 节点，以及含嵌入的引用/callout 节点切换到新状态
     const walk = (node: MindMapNode) => {
-      if (node.type === 'embed') node.expanded = this.embedsExpanded;
+      if (node.type === 'embed' || node.hasEmbed) node.expanded = this.embedsExpanded;
       node.children.forEach(walk);
     };
     walk(this.currentRoot);
@@ -365,7 +365,27 @@ export class MindMapView extends ItemView {
     }
 
     if (node.renderMode === 'inline') {
-      const inner = await this.renderMd(node.markdown || '', sourcePath, scope);
+      const md = node.markdown || '';
+      // blockquote / callout 内若含 ![[X]] 嵌入：生成"链接态 + 嵌入态"两个版本，
+      // 跟随全局"展开引用/收拢引用"切换（toggleAllEmbeds 翻转 expanded）
+      const hasEmbed = /!\[\[[^\]]+\]\]/.test(md);
+      if (hasEmbed && (node.type === 'blockquote' || node.type === 'callout')) {
+        const linkInner = await this.renderMd(md.replace(/!\[\[/g, '[['), sourcePath, scope);
+        const embedInner = await this.renderMd(md, sourcePath, scope);
+        const cls = `mm-inline mm-${node.type}${node.isSupplement ? ' mm-supplement' : ''}`;
+        node.summaryHtml =
+          `<div class="mm-card ${cls}" data-node-id="${node.id}">` +
+          `<button class="expand-btn" aria-label="展开">+</button>` +
+          `<div class="mm-card-body">${linkInner}</div></div>`;
+        node.fullHtml =
+          `<div class="mm-card ${cls}" data-node-id="${node.id}">` +
+          `<button class="collapse-btn" aria-label="收起">−</button>` +
+          `<div class="mm-card-body">${embedInner}</div></div>`;
+        node.hasEmbed = true;
+        node.expanded = this.embedsExpanded;
+        return;
+      }
+      const inner = await this.renderMd(md, sourcePath, scope);
       const html = this.wrapInline(node, inner);
       node.summaryHtml = html;
       node.fullHtml = html;
@@ -374,18 +394,19 @@ export class MindMapView extends ItemView {
 
     // collapsible
     if (node.collapsedMarkdown) {
-      // embed 节点：折叠态也需渲染 markdown（[[X]] 双链）
       const collapsedInner = await this.renderMd(node.collapsedMarkdown, sourcePath, scope);
       node.summaryHtml =
-        `<div class="mm-embed-link" data-node-id="${node.id}">${collapsedInner}` +
-        `<button class="expand-btn">展开</button></div>`;
+        `<div class="mm-card mm-embed-link" data-node-id="${node.id}">` +
+        `<button class="expand-btn" aria-label="展开">+</button>` +
+        `<div class="mm-card-body">${collapsedInner}</div></div>`;
     } else {
       node.summaryHtml = node.collapsedHtml || `<span data-node-id="${node.id}">…</span>`;
     }
     const inner = node.expandedHtml ?? await this.renderMd(node.markdown || '', sourcePath, scope);
     node.fullHtml =
-      `<div class="mm-expanded" data-node-id="${node.id}">${inner}` +
-      `<button class="collapse-btn">折叠</button></div>`;
+      `<div class="mm-card mm-expanded" data-node-id="${node.id}">` +
+      `<button class="collapse-btn" aria-label="收起">−</button>` +
+      `<div class="mm-card-body">${inner}</div></div>`;
   }
 
   /** 调 Obsidian 渲染一段 markdown，返回 innerHTML 字符串 */

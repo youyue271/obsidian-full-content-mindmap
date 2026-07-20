@@ -78,6 +78,9 @@ export interface MindMapNode {
   /** 是否为"补充说明"节点（如 > 引用），渲染时加视觉标记挂在上一节点下方 */
   isSupplement?: boolean;
 
+  /** blockquote/callout 内是否含 ![[X]] 嵌入（由 view 渲染时置位，供全局展开/收拢引用识别） */
+  hasEmbed?: boolean;
+
   /** 该块在源文件中的起始行（0-based） */
   startLine: number;
 

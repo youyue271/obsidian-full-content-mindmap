@@ -32,7 +32,7 @@ export function createMarkmap(svgEl: SVGSVGElement, initialLevel = FULL_EXPAND):
 
   const mm = Markmap.create(svgEl, {
     duration: 300,
-    maxWidth: 260,
+    maxWidth: 360,
     initialExpandLevel: -1,   // 由 apply() 统一管控，这里只设初始值
     spacingHorizontal: 40,
     spacingVertical: 6,

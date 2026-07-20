@@ -236,9 +236,10 @@ function configureNode(node: MindMapNode, block: ParsedBlock): MindMapNode {
       } else {
         node.renderMode = 'collapsible';
         node.markdown = text;
-        const preview = escapeHtml(oneLine(text).slice(0, 80));
+        const preview = escapeHtml(oneLine(text).slice(0, 100));
         node.collapsedHtml =
-          `<span data-node-id="${node.id}">${preview}… <button class="expand-btn">展开</button></span>`;
+          `<span class="mm-collapsible" data-node-id="${node.id}">` +
+          `<button class="expand-btn">+</button>${preview}…</span>`;
       }
       node.rawForEdit = block.rawEdit ?? block.raw;
       return node;
@@ -248,25 +249,26 @@ function configureNode(node: MindMapNode, block: ParsedBlock): MindMapNode {
       const firstLine = (block.raw.split('\n')[0] || '').trim();
       const langBadge = block.lang ? escapeHtml(block.lang) : '代码';
       node.renderMode = 'collapsible';
-      node.collapsedHtml = `<div class="code-summary" data-node-id="${node.id}">` +
+      node.collapsedHtml =
+        `<div class="code-summary" data-node-id="${node.id}">` +
+        `<button class="expand-btn">+</button>` +
         `<span class="code-lang">${langBadge}</span>` +
-        `<code>${escapeHtml(firstLine || '…')}</code>` +
-        `<button class="expand-btn">展开</button></div>`;
-      // 展开时重新围栏交给 Obsidian 渲染（获得语法高亮）
+        `<code>${escapeHtml(firstLine || '…')}</code></div>`;
       const fence = '```' + (block.lang || '') + '\n' + block.raw + '\n```';
       node.markdown = fence;
-      node.rawForEdit = block.rawEdit ?? fence; // 编辑时含围栏
+      node.rawForEdit = block.rawEdit ?? fence;
       return node;
     }
 
     case 'table': {
       const lines = block.raw.split('\n').filter((l) => l.trim());
-      const rows = Math.max(lines.length - 1, 0); // 减去分隔行
+      const rows = Math.max(lines.length - 1, 0);
       const cols = (lines[0]?.match(/\|/g)?.length || 2) - 1;
       node.renderMode = 'collapsible';
-      node.collapsedHtml = `<div class="table-summary" data-node-id="${node.id}">` +
-        `📊 表格 (${rows}×${cols})<button class="expand-btn">展开</button></div>`;
-      node.markdown = block.raw; // 展开时渲染为真正的 HTML 表格
+      node.collapsedHtml =
+        `<div class="table-summary" data-node-id="${node.id}">` +
+        `<button class="expand-btn">+</button>📊 ${rows}×${cols}</div>`;
+      node.markdown = block.raw;
       node.rawForEdit = block.rawEdit ?? block.raw;
       return node;
     }
