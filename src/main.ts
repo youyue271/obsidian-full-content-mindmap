@@ -43,15 +43,6 @@ export default class FullContentMindMapPlugin extends Plugin {
       },
     });
 
-    // 监听活动 leaf 切换：只有切入的 leaf 本身是思维导图时才渲染，避免切换无关窗口触发
-    this.registerEvent(
-      this.app.workspace.on('active-leaf-change', (leaf) => {
-        if (leaf?.view instanceof MindMapView) {
-          (leaf.view as MindMapView).renderCurrentFile();
-        }
-      })
-    );
-
     // 监听文件内容变化：遍历所有导图，各自判断改动的文件是否是自己绑定的
     this.registerEvent(
       this.app.vault.on('modify', (file) => {

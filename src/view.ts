@@ -28,11 +28,10 @@ export class MindMapView extends ItemView {
   private fitTimer: number | null = null;
   private levelSel: HTMLSelectElement | null = null;
   private embedBtn: HTMLButtonElement | null = null;
-  /** 当前 embed 节点的展开状态（true = 展开显示嵌入内容） */
   private embedsExpanded = false;
-  /** 承载本轮 markdown 渲染产生的子组件，重渲前整体卸载以避免泄漏 */
+  /** 上一次实际渲染的文件路径，用于跳过 setState 的重复渲染 */
+  private lastRenderedPath: string | null = null;
   private renderScope: Component | null = null;
-  /** 当前打开的行内编辑浮层（双击节点编辑源文件） */
   private editOverlay: HTMLElement | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: FullContentMindMapPlugin) {
@@ -76,8 +75,11 @@ export class MindMapView extends ItemView {
   }
 
   async setState(state: any, result: any): Promise<void> {
-    if (state?.file) this.filePath = state.file;
+    const newPath: string | undefined = state?.file;
+    if (newPath) this.filePath = newPath;
     await super.setState(state, result);
+    // 只在绑定的文件真正发生变化时才重渲，避免窗口切换焦点导致的重复渲染
+    if (newPath && newPath === this.lastRenderedPath) return;
     await this.renderCurrentFile();
   }
 
@@ -326,6 +328,7 @@ export class MindMapView extends ItemView {
   async renderFile(file: TFile): Promise<void> {
     this.currentFile = file;
     this.filePath = file.path;
+    this.lastRenderedPath = file.path;
 
     const content = await this.app.vault.cachedRead(file);
     const blocks = parseMarkdown(content);
