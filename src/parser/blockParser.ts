@@ -185,20 +185,27 @@ export function parseMarkdown(content: string): ParsedBlock[] {
   function parseListItems(items: ListItem[], parentLine: number): ParsedBlock[] {
     return items.map((item, i) => {
       const line = lineOf(item, parentLine + i);
-      const itemEndLine = item.position?.end.line ? item.position.end.line - 1 : line;
 
       const nested = item.children.find((c: any) => c.type === 'list') as List | undefined;
 
       const itemStart = item.position?.start.offset ?? 0;
       const itemEnd = item.position?.end.offset ?? itemStart;
+      // 边界取到嵌套子列表起点，因此 ownText 只含列表项自身文本（不含子项）
       const boundary = nested?.position?.start.offset ?? itemEnd;
-      let text = src.slice(itemStart, boundary);
-      const rawEdit = text; // 含列表标记的原文，用于写回
-      text = dedentListItem(text);
+      const ownText = src.slice(itemStart, boundary);
+
+      // endLine 按「自身文本占用的行数」计算，绝不能用 item.position.end——
+      // remark 里含嵌套子列表的列表项，其 position.end 会延伸到整个子列表末尾，
+      // 那样写回会连子项一起覆盖删除。
+      const ownLineCount = ownText.replace(/\s+$/, '').split('\n').length;
+      const endLine = line + ownLineCount - 1;
+
+      const rawEdit = ownText.replace(/\s+$/, '');       // 含列表标记的自身原文，用于写回
+      const text = dedentListItem(ownText);              // 去标记后的正文，用于渲染
 
       const children = nested ? parseListItems(nested.children, line) : undefined;
 
-      return { type: 'list', raw: text, rawEdit, startLine: line, endLine: itemEndLine, children } as ParsedBlock;
+      return { type: 'list', raw: text, rawEdit, startLine: line, endLine, children } as ParsedBlock;
     });
   }
 
