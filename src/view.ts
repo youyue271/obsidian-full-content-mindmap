@@ -464,7 +464,9 @@ export class MindMapView extends ItemView {
    * - 其它：自身 endLine
    */
   private sectionEndLine(node: MindMapNode, totalLines: number): number {
-    if (node.type !== 'heading' || !this.currentRoot) return node.endLine;
+    // 非标题：取节点及其所有后代的最大 endLine（含嵌套子列表 / 冒号子项），
+    // 否则会把兄弟节点插到当前节点和它的子节点之间。
+    if (node.type !== 'heading' || !this.currentRoot) return this.deepEndLine(node);
     const level = node.headingLevel ?? 1;
 
     // 收集全树中所有标题，按 startLine 排序，找 node 之后第一个 level<= 的
@@ -479,6 +481,15 @@ export class MindMapView extends ItemView {
     const after = headings.filter((h) => h.startLine > node.startLine);
     const nextSameOrHigher = after.find((h) => (h.headingLevel ?? 1) <= level);
     return nextSameOrHigher ? nextSameOrHigher.startLine - 1 : totalLines - 1;
+  }
+
+  /** 递归取节点及其所有后代的最大 endLine */
+  private deepEndLine(node: MindMapNode): number {
+    let max = node.endLine;
+    for (const child of node.children) {
+      max = Math.max(max, this.deepEndLine(child));
+    }
+    return max;
   }
 
   /** 从列表项原文提取行首缩进（用于插入同级/子列表项时保持缩进） */
