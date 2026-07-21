@@ -33,6 +33,10 @@ export class MindMapView extends ItemView {
   private lastRenderedPath: string | null = null;
   private renderScope: Component | null = null;
   private editOverlay: HTMLElement | null = null;
+  /** 当前选中节点 id（键盘操作的作用对象） */
+  private selectedNodeId: string | null = null;
+  /** 写入后期望重新聚焦的源文件行号（重渲后据此恢复选中） */
+  private pendingFocusLine: number | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: FullContentMindMapPlugin) {
     super(leaf);
@@ -159,6 +163,10 @@ export class MindMapView extends ItemView {
     // 双击节点 → 编辑源文件。capture 阶段拦截，先于 markmap 的 dblclick stopPropagation
     svgWrap.addEventListener('dblclick', (e: MouseEvent) => this.handleDblClick(e), true);
 
+    // 键盘快捷键（新建/删除/导航/编辑），容器需可聚焦
+    svgWrap.tabIndex = 0;
+    svgWrap.addEventListener('keydown', (e: KeyboardEvent) => this.handleKeyDown(e));
+
     await this.renderCurrentFile();
   }
 
@@ -216,7 +224,30 @@ export class MindMapView extends ItemView {
       if (href) window.open(href, '_blank');
       e.stopPropagation();
       e.preventDefault();
+      return;
     }
+
+    // 4) 点击节点内容区 → 选中该节点（键盘操作的作用对象）
+    const nodeEl = target.closest('[data-node-id]') as HTMLElement | null;
+    if (nodeEl?.dataset.nodeId) {
+      this.selectNode(nodeEl.dataset.nodeId);
+    }
+  }
+
+  /** 选中节点：更新 selectedNodeId 并刷新高亮 */
+  private selectNode(nodeId: string | null): void {
+    this.selectedNodeId = nodeId;
+    this.refreshSelectionHighlight();
+  }
+
+  /** 根据 selectedNodeId 给对应 foreignObject 加/去 mm-selected 高亮 */
+  private refreshSelectionHighlight(): void {
+    if (!this.svgEl) return;
+    this.svgEl.querySelectorAll('.mm-selected').forEach((el) => el.classList.remove('mm-selected'));
+    if (!this.selectedNodeId) return;
+    const el = this.svgEl.querySelector(`[data-node-id="${this.selectedNodeId}"]`);
+    // 高亮加在节点根 div（.markmap-foreign 的子 div）上
+    el?.closest('.markmap-foreign')?.classList.add('mm-selected');
   }
 
   /** 双击节点 → 弹出编辑框修改源文件对应块 */
@@ -317,6 +348,229 @@ export class MindMapView extends ItemView {
     return null;
   }
 
+  /** 查找节点的父节点 */
+  private findParent(root: MindMapNode, target: MindMapNode): MindMapNode | null {
+    for (const child of root.children) {
+      if (child === target) return root;
+      const found = this.findParent(child, target);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  // ─────────────────────────────────────────────
+  // 键盘操作
+  // ─────────────────────────────────────────────
+
+  private handleKeyDown(e: KeyboardEvent): void {
+    // 编辑框打开时交给编辑框自己处理
+    if (this.editOverlay) return;
+    if (!this.currentRoot) return;
+
+    const sel = this.selectedNodeId ? this.findNodeById(this.currentRoot, this.selectedNodeId) : null;
+
+    switch (e.key) {
+      case 'Enter':
+        if (sel) { e.preventDefault(); this.insertSibling(sel); }
+        break;
+      case 'Tab':
+        if (sel) { e.preventDefault(); this.insertChild(sel); }
+        break;
+      case 'Delete':
+      case 'Backspace':
+        if (sel) { e.preventDefault(); this.deleteNode(sel); }
+        break;
+      case 'F2':
+        if (sel && sel.rawForEdit !== undefined) {
+          e.preventDefault();
+          this.openEditorForSelected(sel);
+        }
+        break;
+      case 'ArrowUp':
+        e.preventDefault(); this.navigateSibling(sel, -1);
+        break;
+      case 'ArrowDown':
+        e.preventDefault(); this.navigateSibling(sel, 1);
+        break;
+      case 'ArrowLeft':
+        e.preventDefault(); this.navigateToParent(sel);
+        break;
+      case 'ArrowRight':
+        e.preventDefault(); this.navigateToChild(sel);
+        break;
+      case 'Escape':
+        this.selectNode(null);
+        break;
+    }
+  }
+
+  // ── 导航 ──
+
+  private navigateSibling(sel: MindMapNode | null, dir: 1 | -1): void {
+    if (!this.currentRoot) return;
+    if (!sel) { // 未选中：选第一个顶层子节点
+      const first = this.currentRoot.children[0];
+      if (first) this.selectNode(first.id);
+      return;
+    }
+    const parent = this.findParent(this.currentRoot, sel);
+    if (!parent) return;
+    const idx = parent.children.indexOf(sel);
+    const next = parent.children[idx + dir];
+    if (next) this.selectNode(next.id);
+  }
+
+  private navigateToParent(sel: MindMapNode | null): void {
+    if (!this.currentRoot || !sel) return;
+    const parent = this.findParent(this.currentRoot, sel);
+    if (parent && parent !== this.currentRoot) this.selectNode(parent.id);
+  }
+
+  private navigateToChild(sel: MindMapNode | null): void {
+    if (!sel) return;
+    const first = sel.children[0];
+    if (first) this.selectNode(first.id);
+  }
+
+  private openEditorForSelected(node: MindMapNode): void {
+    const el = this.svgEl?.querySelector(`[data-node-id="${node.id}"]`) as HTMLElement | null;
+    const rect = el?.getBoundingClientRect();
+    this.openEditor(node, rect?.left ?? 200, rect?.bottom ?? 200);
+  }
+
+  // ── 新建 / 删除 ──
+
+  /**
+   * 计算节点"所在区域"的结束行（含子内容）：
+   * - 标题：下一个同级或更高级标题的 startLine - 1，否则文件末尾
+   * - 其它：自身 endLine
+   */
+  private sectionEndLine(node: MindMapNode, totalLines: number): number {
+    if (node.type !== 'heading' || !this.currentRoot) return node.endLine;
+    const level = node.headingLevel ?? 1;
+
+    // 收集全树中所有标题，按 startLine 排序，找 node 之后第一个 level<= 的
+    const headings: MindMapNode[] = [];
+    const collect = (n: MindMapNode) => {
+      if (n.type === 'heading') headings.push(n);
+      n.children.forEach(collect);
+    };
+    collect(this.currentRoot);
+    headings.sort((a, b) => a.startLine - b.startLine);
+
+    const after = headings.filter((h) => h.startLine > node.startLine);
+    const nextSameOrHigher = after.find((h) => (h.headingLevel ?? 1) <= level);
+    return nextSameOrHigher ? nextSameOrHigher.startLine - 1 : totalLines - 1;
+  }
+
+  /** 从列表项原文提取行首缩进（用于插入同级/子列表项时保持缩进） */
+  private listIndent(node: MindMapNode): string {
+    const m = (node.rawForEdit ?? '').match(/^([ \t]*)(?:[-*+]|\d+[.)])\s/);
+    return m ? m[1] : '';
+  }
+
+  /** 新建兄弟节点：在当前节点所在区域之后插入同类空节点 */
+  private async insertSibling(node: MindMapNode): Promise<void> {
+    if (!this.currentFile || node.type === 'root') return;
+    const content = await this.app.vault.read(this.currentFile);
+    const lines = content.split('\n');
+    const at = this.sectionEndLine(node, lines.length) + 1;
+
+    let text: string;
+    switch (node.type) {
+      case 'heading': {
+        const hashes = '#'.repeat(node.headingLevel ?? 1);
+        text = `${hashes} `;
+        break;
+      }
+      case 'list':
+        text = `${this.listIndent(node)}- `;
+        break;
+      default:
+        text = ''; // 段落/引用/embed → 空段落（前后自动有空行分隔）
+    }
+
+    // 兄弟之间用空行分隔（段落类），标题/列表不需要额外空行
+    const insertLines = node.type === 'heading' || node.type === 'list'
+      ? [text]
+      : ['', text];
+    lines.splice(at, 0, ...insertLines);
+    // 聚焦到刚插入的那一行（insertLines 里 text 所在行）
+    this.pendingFocusLine = at + (insertLines.length - 1);
+    await this.writeAndReopen(lines.join('\n'));
+  }
+
+  /** 新建子节点：在当前节点自身末行之后插入下级空节点 */
+  private async insertChild(node: MindMapNode): Promise<void> {
+    if (!this.currentFile || node.type === 'embed') return;
+    const content = await this.app.vault.read(this.currentFile);
+    const lines = content.split('\n');
+    const at = node.endLine + 1;
+
+    let text: string;
+    switch (node.type) {
+      case 'heading': {
+        const childLevel = Math.min((node.headingLevel ?? 1) + 1, 6);
+        text = `${'#'.repeat(childLevel)} `;
+        break;
+      }
+      case 'list':
+        text = `${this.listIndent(node)}\t- `; // 深一级缩进
+        break;
+      case 'paragraph':
+        // 冒号段落 → 子项用列表；普通段落 → 子段落
+        text = /[：:]\s*$/.test(node.rawForEdit ?? '') ? '- ' : '';
+        break;
+      default:
+        text = '';
+    }
+
+    const insertLines = node.type === 'heading' || node.type === 'list' || text.startsWith('-')
+      ? [text]
+      : ['', text];
+    lines.splice(at, 0, ...insertLines);
+    this.pendingFocusLine = at + (insertLines.length - 1);
+    await this.writeAndReopen(lines.join('\n'));
+  }
+
+  /** 删除节点自身行（不含子树；标题的子内容会在重渲后上浮） */
+  private async deleteNode(node: MindMapNode): Promise<void> {
+    if (!this.currentFile || node.type === 'root') return;
+    const content = await this.app.vault.read(this.currentFile);
+    const lines = content.split('\n');
+    lines.splice(node.startLine, node.endLine - node.startLine + 1);
+    this.selectedNodeId = null;
+    this.pendingFocusLine = null;
+    await this.writeAndReopen(lines.join('\n'));
+  }
+
+  /** 写回文件并重渲，重渲后若有 pendingFocusLine 则选中并打开编辑框 */
+  private async writeAndReopen(newContent: string): Promise<void> {
+    if (!this.currentFile) return;
+    await this.app.vault.modify(this.currentFile, newContent);
+    await this.renderCurrentFile();
+
+    if (this.pendingFocusLine !== null && this.currentRoot) {
+      const target = this.pendingFocusLine;
+      this.pendingFocusLine = null;
+      const found = this.findNodeByStartLine(this.currentRoot, target);
+      if (found) {
+        this.selectNode(found.id);
+        if (found.rawForEdit !== undefined) this.openEditorForSelected(found);
+      }
+    }
+  }
+
+  /** 按 startLine 精确匹配节点 */
+  private findNodeByStartLine(root: MindMapNode, line: number): MindMapNode | null {
+    if (root.type !== 'root' && root.startLine === line) return root;
+    for (const child of root.children) {
+      const found = this.findNodeByStartLine(child, line);
+      if (found) return found;
+    }
+    return null;
+  }
+
   async renderCurrentFile(): Promise<void> {
     if (!this.filePath) return;
     const f = this.app.vault.getAbstractFileByPath(this.filePath);
@@ -353,6 +607,8 @@ export class MindMapView extends ItemView {
     if (this.mm) {
       this.mm.setData(root);
       this.scheduleFit();
+      // 重渲后 DOM 重建，若之前有选中节点则重新高亮（延迟到 DOM 稳定）
+      setTimeout(() => this.refreshSelectionHighlight(), 100);
     }
   }
 
