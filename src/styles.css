@@ -71,46 +71,24 @@
 }
 
 /* ─────────────────────────────────────────────
-   双击节点编辑浮层
+   节点原地编辑：直接叠在节点位置上的 textarea
    ───────────────────────────────────────────── */
-.mm-edit-overlay {
+.mm-inline-edit {
   position: absolute;
   z-index: 100;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px;
-  background: var(--background-primary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-}
-
-.mm-edit-textarea {
-  width: 100%;
-  min-height: 120px;
-  resize: vertical;
-  font-family: var(--font-monospace, monospace);
-  font-size: 13px;
-  line-height: 1.5;
-  padding: 6px 8px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  background: var(--background-primary);
+  margin: 0;
+  padding: 2px 4px;
+  resize: none;
+  overflow: hidden;
+  font-family: var(--font-text, var(--font-interface));
+  font-size: var(--mm-font-size, 14px);
+  line-height: var(--mm-line-height, 1.5);
   color: var(--text-normal);
+  background: var(--background-primary);
+  border: 1px solid var(--interactive-accent);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   box-sizing: border-box;
-}
-
-.mm-edit-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.mm-edit-hint {
-  flex: 1;
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 /* 视图内容区：Obsidian 的 .view-content 需显式撑满，否则子 flex 高度塌陷 */

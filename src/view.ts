@@ -265,48 +265,68 @@ export class MindMapView extends ItemView {
 
     e.stopPropagation();
     e.preventDefault();
-    this.openEditor(node, e.clientX, e.clientY);
+    this.openEditor(node);
   }
 
-  /** 打开浮动编辑框 */
-  private openEditor(node: MindMapNode, clientX: number, clientY: number): void {
+  /**
+   * 原地编辑：在节点 DOM 元素的位置直接叠一个 textarea，无弹框、无按钮。
+   * Enter 保存（Shift+Enter 换行），Esc 取消，失焦保存。
+   */
+  private openEditor(node: MindMapNode): void {
     this.closeEditor();
+    if (!this.svgEl) return;
 
-    const overlay = this.containerEl.createDiv({ cls: 'mm-edit-overlay' });
-    const rect = this.containerEl.getBoundingClientRect();
+    // 找到节点在 SVG 里的 DOM 元素，定位编辑框覆盖其上
+    const nodeEl = this.svgEl.querySelector(`[data-node-id="${node.id}"]`) as HTMLElement | null;
+    const foreign = nodeEl?.closest('.markmap-foreign') as HTMLElement | null;
+    const anchor = foreign ?? nodeEl;
+    const containerRect = this.containerEl.getBoundingClientRect();
+    const rect = anchor?.getBoundingClientRect();
 
-    const textarea = overlay.createEl('textarea', { cls: 'mm-edit-textarea' });
+    const textarea = this.containerEl.createEl('textarea', { cls: 'mm-inline-edit' });
     textarea.value = node.rawForEdit ?? '';
 
-    const bar = overlay.createDiv({ cls: 'mm-edit-bar' });
-    bar.createSpan({ cls: 'mm-edit-hint', text: 'Ctrl+Enter 保存 · Esc 取消' });
-    const saveBtn = bar.createEl('button', { cls: 'mm-btn', text: '保存' });
-    const cancelBtn = bar.createEl('button', { cls: 'mm-btn', text: '取消' });
+    const left = rect ? rect.left - containerRect.left : 8;
+    const top = rect ? rect.top - containerRect.top : 8;
+    const width = Math.max(rect?.width ?? 0, 160);
+    textarea.style.left = `${left}px`;
+    textarea.style.top = `${top}px`;
+    textarea.style.width = `${width}px`;
 
-    // 定位在点击处附近，钳制在容器内
-    const w = 360, h = 180;
-    let left = clientX - rect.left + 8;
-    let top = clientY - rect.top + 8;
-    left = Math.max(4, Math.min(left, rect.width - w - 4));
-    top = Math.max(4, Math.min(top, rect.height - h - 4));
-    overlay.style.left = `${left}px`;
-    overlay.style.top = `${top}px`;
+    this.editOverlay = textarea;
 
-    this.editOverlay = overlay;
-
-    const save = () => this.saveNodeEdit(node, textarea.value);
-    saveBtn.addEventListener('click', save);
-    cancelBtn.addEventListener('click', () => this.closeEditor());
+    let done = false; // 防止 blur 与 Enter/Esc 重复触发
+    const save = () => {
+      if (done) return;
+      done = true;
+      this.saveNodeEdit(node, textarea.value);
+    };
+    const cancel = () => {
+      if (done) return;
+      done = true;
+      this.closeEditor();
+    };
+    // 高度自适应内容
+    const autoGrow = () => {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    };
+    textarea.addEventListener('input', autoGrow);
     textarea.addEventListener('keydown', (ev: KeyboardEvent) => {
       if (ev.key === 'Escape') {
         ev.preventDefault();
-        this.closeEditor();
-      } else if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) {
+        cancel();
+      } else if (ev.key === 'Enter' && !ev.shiftKey) {
+        // Enter 保存；Shift+Enter 换行
         ev.preventDefault();
         save();
       }
+      ev.stopPropagation(); // 不让 keydown 冒泡到 svgWrap 的快捷键处理
     });
+    // 失焦即保存（点击别处）
+    textarea.addEventListener('blur', () => save());
 
+    autoGrow();
     textarea.focus();
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
   }
@@ -433,9 +453,7 @@ export class MindMapView extends ItemView {
   }
 
   private openEditorForSelected(node: MindMapNode): void {
-    const el = this.svgEl?.querySelector(`[data-node-id="${node.id}"]`) as HTMLElement | null;
-    const rect = el?.getBoundingClientRect();
-    this.openEditor(node, rect?.left ?? 200, rect?.bottom ?? 200);
+    this.openEditor(node);
   }
 
   // ── 新建 / 删除 ──
