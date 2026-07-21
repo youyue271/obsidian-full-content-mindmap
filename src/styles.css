@@ -84,7 +84,8 @@
   font-size: var(--mm-font-size, 14px);
   line-height: var(--mm-line-height, 1.5);
   color: var(--text-normal);
-  background: var(--background-primary);
+  background-color: var(--background-primary);
+  opacity: 1;
   border: 1px solid var(--interactive-accent);
   border-radius: 4px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);

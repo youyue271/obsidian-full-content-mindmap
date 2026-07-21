@@ -49,7 +49,7 @@ export default class FullContentMindMapPlugin extends Plugin {
         this.app.workspace.getLeavesOfType(VIEW_TYPE).forEach((leaf) => {
           const view = leaf.view as MindMapView;
           if (view.getFilePath() === file.path) {
-            setTimeout(() => view.renderCurrentFile(), 500);
+            setTimeout(() => view.renderCurrentFile(false), 500); // 不自动适应窗口
           }
         });
       })

@@ -354,8 +354,8 @@ export class MindMapView extends ItemView {
       return [...before, ...newText.split('\n'), ...after].join('\n');
     });
 
-    // 立即重渲（vault.on('modify') 也会触发，但有防抖延迟）
-    await this.renderCurrentFile();
+    // 立即重渲，但不自动适应窗口（避免编辑后视图跳动）
+    await this.renderCurrentFile(false);
   }
 
   /** 按 id 在树中查找节点 */
@@ -625,7 +625,7 @@ export class MindMapView extends ItemView {
   private async writeAndReopen(newContent: string, reopenEditor = true): Promise<void> {
     if (!this.currentFile) return;
     await this.app.vault.modify(this.currentFile, newContent);
-    await this.renderCurrentFile();
+    await this.renderCurrentFile(false); // 编辑操作后不自动适应窗口
 
     if (this.pendingFocusLine !== null && this.currentRoot) {
       const target = this.pendingFocusLine;
@@ -648,11 +648,11 @@ export class MindMapView extends ItemView {
     return null;
   }
 
-  async renderCurrentFile(): Promise<void> {
+  async renderCurrentFile(fit = true): Promise<void> {
     if (!this.filePath) return;
     const f = this.app.vault.getAbstractFileByPath(this.filePath);
     if (!(f instanceof TFile) || f.extension !== 'md') return;
-    await this.renderFile(f);
+    await this.renderFile(f, fit);
   }
 
   /** 把设置里的样式项写成容器上的 CSS 变量，供 styles.css 读取 */
@@ -663,7 +663,7 @@ export class MindMapView extends ItemView {
     container.style.setProperty('--mm-line-height', String(s.lineHeight));
   }
 
-  async renderFile(file: TFile): Promise<void> {
+  async renderFile(file: TFile, fit = true): Promise<void> {
     this.currentFile = file;
     this.filePath = file.path;
     this.lastRenderedPath = file.path;
@@ -683,7 +683,7 @@ export class MindMapView extends ItemView {
 
     if (this.mm) {
       this.mm.setData(root);
-      this.scheduleFit();
+      if (fit) this.scheduleFit();
       // 重渲后 DOM 重建，若之前有选中节点则重新高亮（延迟到 DOM 稳定）
       setTimeout(() => this.refreshSelectionHighlight(), 100);
     }
