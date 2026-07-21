@@ -500,9 +500,14 @@ export class MindMapView extends ItemView {
     return max;
   }
 
-  /** 从列表项原文提取行首缩进（用于插入同级/子列表项时保持缩进） */
-  private listIndent(node: MindMapNode): string {
-    const m = (node.rawForEdit ?? '').match(/^([ \t]*)(?:[-*+]|\d+[.)])\s/);
+  /**
+   * 从源文件实际行提取列表项行首缩进。
+   * 注意：不能用 node.rawForEdit——remark 的 listItem position 从标记 `-` 开始，
+   * 不含前导缩进空格，所以 rawForEdit 永远没有缩进。必须读源文件的真实行。
+   */
+  private listIndent(lines: string[], node: MindMapNode): string {
+    const line = lines[node.startLine] ?? '';
+    const m = line.match(/^([ \t]*)(?:[-*+]|\d+[.)])\s/);
     return m ? m[1] : '';
   }
 
@@ -521,7 +526,7 @@ export class MindMapView extends ItemView {
         break;
       }
       case 'list':
-        text = `${this.listIndent(node)}- ${PLACEHOLDER}`;
+        text = `${this.listIndent(lines, node)}- ${PLACEHOLDER}`;
         break;
       default:
         text = PLACEHOLDER; // 段落/引用/embed → 占位段落（前后空行分隔）
@@ -554,7 +559,7 @@ export class MindMapView extends ItemView {
       }
       case 'list':
         // 子列表项：父缩进 + 4 空格（与常见 md 一致，不用制表符，避免解析错乱）
-        text = `${this.listIndent(node)}    - ${PLACEHOLDER}`;
+        text = `${this.listIndent(lines, node)}    - ${PLACEHOLDER}`;
         isListLike = true;
         break;
       case 'paragraph':
