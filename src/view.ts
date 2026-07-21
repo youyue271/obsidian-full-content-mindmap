@@ -17,9 +17,6 @@ import type { MindMapNode } from './types';
 
 export const VIEW_TYPE = 'full-content-mindmap';
 
-/** 新建节点的占位文字（空 markdown 无法正确解析，用占位符保证解析出节点；编辑时全选便于替换） */
-const PLACEHOLDER = '新节点';
-
 export class MindMapView extends ItemView {
   private plugin: FullContentMindMapPlugin;
   private mm: ReturnType<typeof createMarkmap> | null = null;
@@ -331,12 +328,7 @@ export class MindMapView extends ItemView {
 
     autoGrow();
     textarea.focus();
-    // 占位文字全选（首次输入即替换）；已有内容则光标置末尾
-    if ((node.rawForEdit ?? '').includes(PLACEHOLDER)) {
-      textarea.select();
-    } else {
-      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
-    }
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
   }
 
   private closeEditor(): void {
@@ -511,76 +503,111 @@ export class MindMapView extends ItemView {
     return m ? m[1] : '';
   }
 
-  /** 新建兄弟节点：在当前节点所在区域之后插入同类空节点 */
+  /** 新建兄弟节点：在当前节点所在区域之后，打开空白草稿编辑框 */
   private async insertSibling(node: MindMapNode): Promise<void> {
     if (!this.currentFile || node.type === 'root') return;
     const content = await this.app.vault.read(this.currentFile);
     const lines = content.split('\n');
     const at = this.sectionEndLine(node, lines.length) + 1;
 
-    let text: string;
+    let prefix: string;
+    let listLike = false;
     switch (node.type) {
-      case 'heading': {
-        const hashes = '#'.repeat(node.headingLevel ?? 1);
-        text = `${hashes} ${PLACEHOLDER}`;
+      case 'heading':
+        prefix = '#'.repeat(node.headingLevel ?? 1) + ' ';
         break;
-      }
       case 'list':
-        text = `${this.listIndent(lines, node)}- ${PLACEHOLDER}`;
+        prefix = `${this.listIndent(lines, node)}- `;
+        listLike = true;
         break;
       default:
-        text = PLACEHOLDER; // 段落/引用/embed → 占位段落（前后空行分隔）
+        prefix = '';
     }
-
-    // 兄弟之间用空行分隔（段落类），标题/列表不需要额外空行
-    const insertLines = node.type === 'heading' || node.type === 'list'
-      ? [text]
-      : ['', text];
-    lines.splice(at, 0, ...insertLines);
-    // 聚焦到刚插入的那一行（insertLines 里 text 所在行）
-    this.pendingFocusLine = at + (insertLines.length - 1);
-    await this.writeAndReopen(lines.join('\n'));
+    // 段落类兄弟需空行分隔；标题/列表不需要
+    const blankBefore = !(node.type === 'heading' || listLike);
+    this.openDraftEditor(node, at, prefix, blankBefore);
   }
 
-  /** 新建子节点：在当前节点自身末行之后插入下级空节点 */
+  /** 新建子节点：在当前节点自身末行之后，打开空白草稿编辑框 */
   private async insertChild(node: MindMapNode): Promise<void> {
     if (!this.currentFile || node.type === 'embed') return;
     const content = await this.app.vault.read(this.currentFile);
     const lines = content.split('\n');
     const at = node.endLine + 1;
 
-    let text: string;
-    let isListLike = false;
+    let prefix: string;
+    let listLike = false;
     switch (node.type) {
-      case 'heading': {
-        const childLevel = Math.min((node.headingLevel ?? 1) + 1, 6);
-        text = `${'#'.repeat(childLevel)} ${PLACEHOLDER}`;
+      case 'heading':
+        prefix = '#'.repeat(Math.min((node.headingLevel ?? 1) + 1, 6)) + ' ';
         break;
-      }
       case 'list':
-        // 子列表项：父缩进 + 4 空格（与常见 md 一致，不用制表符，避免解析错乱）
-        text = `${this.listIndent(lines, node)}    - ${PLACEHOLDER}`;
-        isListLike = true;
+        prefix = `${this.listIndent(lines, node)}    - `; // 深一级（4 空格）
+        listLike = true;
         break;
       case 'paragraph':
-        // 冒号段落 → 子项用列表；普通段落 → 子段落
-        if (/[：:]\s*$/.test(node.rawForEdit ?? '')) {
-          text = `- ${PLACEHOLDER}`;
-          isListLike = true;
-        } else {
-          text = PLACEHOLDER;
-        }
+        if (/[：:]\s*$/.test(node.rawForEdit ?? '')) { prefix = '- '; listLike = true; }
+        else prefix = '';
         break;
       default:
-        text = PLACEHOLDER;
+        prefix = '';
     }
+    const blankBefore = !(node.type === 'heading' || listLike);
+    this.openDraftEditor(node, at, prefix, blankBefore);
+  }
 
-    const insertLines = node.type === 'heading' || node.type === 'list' || isListLike
-      ? [text]
-      : ['', text];
-    lines.splice(at, 0, ...insertLines);
-    this.pendingFocusLine = at + (insertLines.length - 1);
-    await this.writeAndReopen(lines.join('\n'));
+  /**
+   * 打开"草稿"编辑框：位置贴在参照节点附近，内容为空。
+   * 只有用户输入了非空内容才写回文件（prefix + 内容插到 at 行）；
+   * 直接 Esc / 空内容失焦则不改动文件——因此不需要占位文字。
+   */
+  private openDraftEditor(refNode: MindMapNode, at: number, prefix: string, blankBefore: boolean): void {
+    this.closeEditor();
+    if (!this.svgEl) return;
+
+    const refEl = this.svgEl.querySelector(`[data-node-id="${refNode.id}"]`) as HTMLElement | null;
+    const foreign = refEl?.closest('.markmap-foreign') as HTMLElement | null;
+    const containerRect = this.containerEl.getBoundingClientRect();
+    const rect = (foreign ?? refEl)?.getBoundingClientRect();
+
+    const textarea = this.containerEl.createEl('textarea', { cls: 'mm-inline-edit' });
+    textarea.value = '';
+    textarea.placeholder = '输入内容，Enter 确认';
+
+    const left = rect ? rect.left - containerRect.left : 8;
+    const top = rect ? rect.bottom - containerRect.top + 4 : 8; // 参照节点下方
+    textarea.style.left = `${left}px`;
+    textarea.style.top = `${top}px`;
+    textarea.style.width = `${Math.max(rect?.width ?? 0, 160)}px`;
+    this.editOverlay = textarea;
+
+    let done = false;
+    const commit = async () => {
+      if (done) return;
+      done = true;
+      const val = textarea.value.trim();
+      this.closeEditor();
+      if (!val || !this.currentFile) return; // 空内容 → 不写文件
+
+      const content = await this.app.vault.read(this.currentFile);
+      const lines = content.split('\n');
+      const insertLines = blankBefore ? ['', prefix + val] : [prefix + val];
+      lines.splice(at, 0, ...insertLines);
+      this.pendingFocusLine = at + (insertLines.length - 1);
+      await this.writeAndReopen(lines.join('\n'), false); // 写后选中，不再开编辑框
+    };
+    const cancel = () => { if (done) return; done = true; this.closeEditor(); };
+
+    const autoGrow = () => { textarea.style.height = 'auto'; textarea.style.height = `${textarea.scrollHeight}px`; };
+    textarea.addEventListener('input', autoGrow);
+    textarea.addEventListener('keydown', (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') { ev.preventDefault(); cancel(); }
+      else if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); commit(); }
+      ev.stopPropagation();
+    });
+    textarea.addEventListener('blur', () => commit());
+    autoGrow();
+    textarea.focus();
   }
 
   /** 删除节点自身行（不含子树；标题的子内容会在重渲后上浮） */
@@ -595,7 +622,7 @@ export class MindMapView extends ItemView {
   }
 
   /** 写回文件并重渲，重渲后若有 pendingFocusLine 则选中并打开编辑框 */
-  private async writeAndReopen(newContent: string): Promise<void> {
+  private async writeAndReopen(newContent: string, reopenEditor = true): Promise<void> {
     if (!this.currentFile) return;
     await this.app.vault.modify(this.currentFile, newContent);
     await this.renderCurrentFile();
@@ -606,7 +633,7 @@ export class MindMapView extends ItemView {
       const found = this.findNodeByStartLine(this.currentRoot, target);
       if (found) {
         this.selectNode(found.id);
-        if (found.rawForEdit !== undefined) this.openEditorForSelected(found);
+        if (reopenEditor && found.rawForEdit !== undefined) this.openEditorForSelected(found);
       }
     }
   }
