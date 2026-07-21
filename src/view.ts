@@ -17,6 +17,9 @@ import type { MindMapNode } from './types';
 
 export const VIEW_TYPE = 'full-content-mindmap';
 
+/** 新建节点的占位文字（空 markdown 无法正确解析，用占位符保证解析出节点；编辑时全选便于替换） */
+const PLACEHOLDER = '新节点';
+
 export class MindMapView extends ItemView {
   private plugin: FullContentMindMapPlugin;
   private mm: ReturnType<typeof createMarkmap> | null = null;
@@ -328,7 +331,12 @@ export class MindMapView extends ItemView {
 
     autoGrow();
     textarea.focus();
-    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    // 占位文字全选（首次输入即替换）；已有内容则光标置末尾
+    if ((node.rawForEdit ?? '').includes(PLACEHOLDER)) {
+      textarea.select();
+    } else {
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    }
   }
 
   private closeEditor(): void {
@@ -509,14 +517,14 @@ export class MindMapView extends ItemView {
     switch (node.type) {
       case 'heading': {
         const hashes = '#'.repeat(node.headingLevel ?? 1);
-        text = `${hashes} `;
+        text = `${hashes} ${PLACEHOLDER}`;
         break;
       }
       case 'list':
-        text = `${this.listIndent(node)}- `;
+        text = `${this.listIndent(node)}- ${PLACEHOLDER}`;
         break;
       default:
-        text = ''; // 段落/引用/embed → 空段落（前后自动有空行分隔）
+        text = PLACEHOLDER; // 段落/引用/embed → 占位段落（前后空行分隔）
     }
 
     // 兄弟之间用空行分隔（段落类），标题/列表不需要额外空行
@@ -537,24 +545,32 @@ export class MindMapView extends ItemView {
     const at = node.endLine + 1;
 
     let text: string;
+    let isListLike = false;
     switch (node.type) {
       case 'heading': {
         const childLevel = Math.min((node.headingLevel ?? 1) + 1, 6);
-        text = `${'#'.repeat(childLevel)} `;
+        text = `${'#'.repeat(childLevel)} ${PLACEHOLDER}`;
         break;
       }
       case 'list':
-        text = `${this.listIndent(node)}\t- `; // 深一级缩进
+        // 子列表项：父缩进 + 4 空格（与常见 md 一致，不用制表符，避免解析错乱）
+        text = `${this.listIndent(node)}    - ${PLACEHOLDER}`;
+        isListLike = true;
         break;
       case 'paragraph':
         // 冒号段落 → 子项用列表；普通段落 → 子段落
-        text = /[：:]\s*$/.test(node.rawForEdit ?? '') ? '- ' : '';
+        if (/[：:]\s*$/.test(node.rawForEdit ?? '')) {
+          text = `- ${PLACEHOLDER}`;
+          isListLike = true;
+        } else {
+          text = PLACEHOLDER;
+        }
         break;
       default:
-        text = '';
+        text = PLACEHOLDER;
     }
 
-    const insertLines = node.type === 'heading' || node.type === 'list' || text.startsWith('-')
+    const insertLines = node.type === 'heading' || node.type === 'list' || isListLike
       ? [text]
       : ['', text];
     lines.splice(at, 0, ...insertLines);
