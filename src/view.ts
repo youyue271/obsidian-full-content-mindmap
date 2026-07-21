@@ -269,6 +269,25 @@ export class MindMapView extends ItemView {
   }
 
   /**
+   * 把节点原文拆成"格式前缀 + 可编辑正文"：
+   * - 标题：前缀 = `## `，正文 = 标题文字
+   * - 列表项：前缀 = 缩进 + `- `（含任务框 `[ ]`），正文 = 列表文字
+   * - 其余（段落/引用/callout/代码/表格）：无前缀，整体可编辑
+   */
+  private splitEditable(node: MindMapNode): { prefix: string; body: string } {
+    const raw = node.rawForEdit ?? '';
+    if (node.type === 'heading') {
+      const m = raw.match(/^(#{1,6}\s+)([\s\S]*)$/);
+      if (m) return { prefix: m[1], body: m[2] };
+    } else if (node.type === 'list') {
+      // 缩进 + 列表标记 + 可选任务框
+      const m = raw.match(/^([ \t]*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)([\s\S]*)$/);
+      if (m) return { prefix: m[1], body: m[2] };
+    }
+    return { prefix: '', body: raw };
+  }
+
+  /**
    * 原地编辑：在节点 DOM 元素的位置直接叠一个 textarea，无弹框、无按钮。
    * Enter 保存（Shift+Enter 换行），Esc 取消，失焦保存。
    */
@@ -283,8 +302,11 @@ export class MindMapView extends ItemView {
     const containerRect = this.containerEl.getBoundingClientRect();
     const rect = anchor?.getBoundingClientRect();
 
+    // 拆分格式前缀与正文：编辑框只显示正文，保存时再拼回前缀
+    const { prefix, body } = this.splitEditable(node);
+
     const textarea = this.containerEl.createEl('textarea', { cls: 'mm-inline-edit' });
-    textarea.value = node.rawForEdit ?? '';
+    textarea.value = body;
 
     const left = rect ? rect.left - containerRect.left : 8;
     const top = rect ? rect.top - containerRect.top : 8;
@@ -299,7 +321,7 @@ export class MindMapView extends ItemView {
     const save = () => {
       if (done) return;
       done = true;
-      this.saveNodeEdit(node, textarea.value);
+      this.saveNodeEdit(node, prefix + textarea.value);
     };
     const cancel = () => {
       if (done) return;

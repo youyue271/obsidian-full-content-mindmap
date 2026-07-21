@@ -194,14 +194,19 @@ export function parseMarkdown(content: string): ParsedBlock[] {
       const boundary = nested?.position?.start.offset ?? itemEnd;
       const ownText = src.slice(itemStart, boundary);
 
+      // remark 的 listItem position 从标记 `-` 开始，不含前导缩进；
+      // 从行首补回缩进，供写回时保持层级。
+      const lineStart = src.lastIndexOf('\n', itemStart - 1) + 1;
+      const indent = src.slice(lineStart, itemStart);
+
       // endLine 按「自身文本占用的行数」计算，绝不能用 item.position.end——
       // remark 里含嵌套子列表的列表项，其 position.end 会延伸到整个子列表末尾，
       // 那样写回会连子项一起覆盖删除。
       const ownLineCount = ownText.replace(/\s+$/, '').split('\n').length;
       const endLine = line + ownLineCount - 1;
 
-      const rawEdit = ownText.replace(/\s+$/, '');       // 含列表标记的自身原文，用于写回
-      const text = dedentListItem(ownText);              // 去标记后的正文，用于渲染
+      const rawEdit = indent + ownText.replace(/\s+$/, ''); // 含缩进+标记的自身原文，用于写回
+      const text = dedentListItem(ownText);                 // 去标记后的正文，用于渲染
 
       const children = nested ? parseListItems(nested.children, line) : undefined;
 
